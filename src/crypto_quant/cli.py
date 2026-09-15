@@ -8,83 +8,91 @@ from pathlib import Path
 
 import pandas as pd
 
-from .data import update_klines
-from .data_quality import run_data_quality_report
-from .agents import audit_data, run_research_agents
-from .audit import run_system_audit
-from .capacity import run_portfolio_capacity_study
-from .capacity_replay import run_portfolio_capacity_replay_study
-from .diagnostics import run_strategy_autopsy
-from .portfolio import run_donchian_portfolio_study
-from .portfolio_robustness import run_portfolio_neighborhood_study
-from .portfolio_regimes import run_portfolio_regime_study
-from .portfolio_drawdowns import run_portfolio_drawdown_study
-from .portfolio_diversification import run_portfolio_diversification_study
-from .portfolio_margin_stress import run_portfolio_margin_stress
-from .portfolio_stress import run_portfolio_stress
-from .futures import (
+from crypto_quant.data_access.data import update_klines
+from crypto_quant.data_access.data_quality import run_data_quality_report
+from crypto_quant.research.agents import audit_data, run_research_agents
+from crypto_quant.research.audit import run_system_audit
+from crypto_quant.backtesting.capacity import run_portfolio_capacity_study
+from crypto_quant.backtesting.capacity_replay import run_portfolio_capacity_replay_study
+from crypto_quant.backtesting.diagnostics import run_strategy_autopsy
+from crypto_quant.backtesting.portfolio import run_donchian_portfolio_study
+from crypto_quant.backtesting.portfolio_robustness import run_portfolio_neighborhood_study
+from crypto_quant.backtesting.portfolio_regimes import run_portfolio_regime_study
+from crypto_quant.backtesting.portfolio_drawdowns import run_portfolio_drawdown_study
+from crypto_quant.backtesting.portfolio_diversification import run_portfolio_diversification_study
+from crypto_quant.backtesting.portfolio_margin_stress import run_portfolio_margin_stress
+from crypto_quant.backtesting.portfolio_stress import run_portfolio_stress
+from crypto_quant.data_access.futures import (
     BinanceFuturesClient,
     update_funding_mark_prices_from_archive,
     update_funding_from_archive,
     update_funding_from_rest,
 )
-from .forward_review import run_forward_paper_review
-from .integrity import seal_research_artifacts
-from .multiple_testing import run_multiple_testing_audit
-from .open_interest import BinanceOpenInterestArchiveClient
-from .open_interest_study import (
+from crypto_quant.backtesting.forward_review import run_forward_paper_review
+from crypto_quant.research.integrity import seal_research_artifacts
+from crypto_quant.backtesting.multiple_testing import run_multiple_testing_audit
+from crypto_quant.data_access.open_interest import BinanceOpenInterestArchiveClient
+from crypto_quant.strategies.open_interest_study import (
     export_rc01_pinned_trials,
     run_open_interest_confirmed_donchian_study,
 )
-from .order_book_replay import run_order_book_replay_study
-from .positioning_study import run_positioning_extremes_event_study
-from .open_interest import (
+from crypto_quant.backtesting.order_book_replay import run_order_book_replay_study
+from crypto_quant.strategies.positioning_study import run_positioning_extremes_event_study
+from crypto_quant.data_access.open_interest import (
     update_open_interest_from_archive,
 )
-from .integrity import enable_paper_append_manifest
-from .reporting_funding import run_funding_study
-from .paper import initialize_paper_session, update_paper_session
-from .shadow import (
+from crypto_quant.research.integrity import enable_paper_append_manifest
+from crypto_quant.research.reporting_funding import run_funding_study
+from crypto_quant.execution.paper import initialize_paper_session, update_paper_session
+from crypto_quant.execution.shadow import (
     ShadowSession,
     replay_shadow_events,
     run_public_stream,
 )
-from .testnet import (
+from crypto_quant.execution.testnet import (
     RequestsTransport,
     TestnetClient,
     TestnetCredentials,
     TestnetRehearsal,
     TestnetSession,
 )
-from .demo import DemoClient, DemoCredentials, DemoRehearsal, DemoSession
-from .futures_demo import (
+from crypto_quant.execution.demo import DemoClient, DemoCredentials, DemoRehearsal, DemoSession
+from crypto_quant.execution.futures_demo import (
     FuturesDemoSession,
     make_futures_demo_orchestrator,
 )
-from .strategy_platform import MetricInputs, STRATEGY_FAMILIES, StrategyPlatform
-from .demo_platform import DemoExecutionOrchestrator, make_demo_orchestrator
-from .data_requests import DataRequestStore, build_inventory_plan, build_dynamic_top50_plan, resume_inventory_plan, run_inventory_plan, run_top50_plan
-from .futures_backfill import build_um_futures_core_plan, repair_partial_metrics, run_um_futures_core_plan, um_futures_core_status
-from .market_data import MarketDataStore
-from .factors import FactorEngine, factor_catalog
-from .factor_evaluation import DEFAULT_FACTOR_UNIVERSE, FactorEvaluationConfig, run_factor_evaluation
-from .positioning_contrarian import (
+from crypto_quant.execution.strategy_platform import MetricInputs, STRATEGY_FAMILIES, StrategyPlatform
+from crypto_quant.execution.demo_platform import DemoExecutionOrchestrator, make_demo_orchestrator
+from crypto_quant.data_access.data_requests import DataRequestStore, build_inventory_plan, build_dynamic_top50_plan, resume_inventory_plan, run_inventory_plan, run_top50_plan
+from crypto_quant.data_access.futures_backfill import build_um_futures_core_plan, repair_partial_metrics, run_um_futures_core_plan, um_futures_core_status
+from crypto_quant.data_access.market_data import MarketDataStore
+from crypto_quant.features.factors import FactorEngine, factor_catalog
+from crypto_quant.features.factor_evaluation import DEFAULT_FACTOR_UNIVERSE, FactorEvaluationConfig, run_factor_evaluation
+from crypto_quant.strategies.positioning_contrarian import (
     PositioningContrarianConfig,
     run_positioning_contrarian_study,
 )
-from .reporting import run_first_study
-from .basket_trend import run_basket_trend_study
-from .basket_vol_beta import run_basket_vol_beta_study
-from .relative_strength import run_cross_sectional_study
-from .risk_parity_vol_target import (
+from crypto_quant.data_access.liquidation_data import (
+    align_liquidation_history,
+    audit_liquidation_alignment,
+    audit_liquidation_history,
+    download_liquidation_history,
+    liquidation_ingestion_status,
+    prepare_liquidation_universe,
+)
+from crypto_quant.research.reporting import run_first_study
+from crypto_quant.strategies.basket_trend import run_basket_trend_study
+from crypto_quant.strategies.basket_vol_beta import run_basket_vol_beta_study
+from crypto_quant.strategies.relative_strength import run_cross_sectional_study
+from crypto_quant.strategies.risk_parity_vol_target import (
     run_risk_parity_study,
     run_risk_parity_v2_confirmatory_study,
 )
-from .robustness import run_robustness_study
-from .strategy_library import run_strategy_library_snapshot
-from .stress import run_execution_stress
-from .uncertainty import run_portfolio_bootstrap_study
-from .walk_forward import run_donchian_portfolio_walk_forward
+from crypto_quant.backtesting.robustness import run_robustness_study
+from crypto_quant.research.strategy_library import run_strategy_library_snapshot
+from crypto_quant.backtesting.stress import run_execution_stress
+from crypto_quant.backtesting.uncertainty import run_portfolio_bootstrap_study
+from crypto_quant.backtesting.walk_forward import run_donchian_portfolio_walk_forward
 
 
 DEFAULT_DB = Path("market_data/crypto_quant.sqlite")
@@ -101,6 +109,9 @@ def main() -> None:
         description="Personal crypto quant research system",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    from crypto_quant.research.factor_mining.cli import add_arguments as add_mining_arguments
+    add_mining_arguments(subparsers.add_parser("factor-mine", help="因子挖掘、固定批次验证和创意入池"))
 
     update = subparsers.add_parser("update-data", help="download public Binance spot klines")
     update.add_argument(
@@ -246,6 +257,70 @@ def main() -> None:
         help="optional comma-separated symbols for exact per-symbol coverage",
     )
 
+    liquidation_plan = subparsers.add_parser(
+        "liquidation-plan",
+        help="freeze the local/provider liquidation symbol and time overlap",
+    )
+    liquidation_plan.add_argument("--db", type=Path, default=DEFAULT_DB)
+    liquidation_plan.add_argument(
+        "--raw-root", type=Path, default=Path("market_data/raw/liquidations")
+    )
+
+    liquidation_download = subparsers.add_parser(
+        "liquidation-download",
+        help="download the exact CryptoHFTData liquidation overlap",
+    )
+    liquidation_download.add_argument("--db", type=Path, default=DEFAULT_DB)
+    liquidation_download.add_argument(
+        "--raw-root", type=Path, default=Path("market_data/raw/liquidations")
+    )
+    liquidation_download.add_argument("--workers", type=int, default=16)
+    liquidation_download.add_argument("--start-date", default=None)
+    liquidation_download.add_argument("--end-date", default=None)
+    liquidation_download.add_argument(
+        "--api-key-env", default="CRYPTOHFTDATA_API_KEY"
+    )
+    liquidation_download.add_argument(
+        "--authorize-public-download", action="store_true"
+    )
+
+    liquidation_align = subparsers.add_parser(
+        "liquidation-align",
+        help="align raw liquidations with local OHLCV, funding, and OI",
+    )
+    liquidation_align.add_argument("--db", type=Path, default=DEFAULT_DB)
+    liquidation_align.add_argument(
+        "--raw-root", type=Path, default=Path("market_data/raw/liquidations")
+    )
+    liquidation_align.add_argument(
+        "--output",
+        type=Path,
+        default=Path("market_data/derived/liquidation_alignment"),
+    )
+    liquidation_status = subparsers.add_parser(
+        "liquidation-status",
+        help="show resumable liquidation download and alignment readiness",
+    )
+    liquidation_status.add_argument(
+        "--raw-root", type=Path, default=Path("market_data/raw/liquidations")
+    )
+    liquidation_audit = subparsers.add_parser(
+        "liquidation-audit",
+        help="verify raw liquidation archives and normalized hourly hashes",
+    )
+    liquidation_audit.add_argument(
+        "--raw-root", type=Path, default=Path("market_data/raw/liquidations")
+    )
+    liquidation_alignment_audit = subparsers.add_parser(
+        "liquidation-alignment-audit",
+        help="audit causal and structural invariants in aligned liquidations",
+    )
+    liquidation_alignment_audit.add_argument(
+        "--output",
+        type=Path,
+        default=Path("market_data/derived/liquidation_alignment"),
+    )
+
     subparsers.add_parser(
         "market-factor-catalog",
         help="show causal derived-factor definitions",
@@ -266,6 +341,7 @@ def main() -> None:
     factor_sample.add_argument("--end", default=None)
     factor_sample.add_argument("--warmup-days", type=int, default=30)
     factor_sample.add_argument("--tail", type=int, default=3)
+    factor_sample.add_argument("--include-liquidations", action="store_true")
 
     factor_evaluate = subparsers.add_parser(
         "factor-evaluate",
@@ -274,7 +350,7 @@ def main() -> None:
     factor_evaluate.add_argument("--db", type=Path, default=DEFAULT_DB)
     factor_evaluate.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     factor_evaluate.add_argument("--symbols", default=",".join(DEFAULT_FACTOR_UNIVERSE))
-    factor_evaluate.add_argument("--interval", default="4h")
+    factor_evaluate.add_argument("--interval", default="1h")
     factor_evaluate.add_argument("--start", default="2023-01-01")
     factor_evaluate.add_argument("--test-start", default="2025-01-01")
     factor_evaluate.add_argument("--end", default="2026-07-31")
@@ -923,7 +999,10 @@ def main() -> None:
     multiple_testing.add_argument("--test-start", default="2023-01-01")
 
     args = parser.parse_args()
-    if args.command == "data-request-create":
+    if args.command == "factor-mine":
+        from crypto_quant.research.factor_mining.cli import execute as execute_mining
+        _print_json(execute_mining(args))
+    elif args.command == "data-request-create":
         if args.spec_json:
             spec = json.loads(args.spec_json.read_text(encoding="utf-8"))
         else:
@@ -979,6 +1058,42 @@ def main() -> None:
     elif args.command == "market-data-catalog":
         symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
         _print_json(MarketDataStore(args.db).catalog(symbols or None))
+    elif args.command == "liquidation-plan":
+        _print_json(prepare_liquidation_universe(args.db, args.raw_root))
+    elif args.command == "liquidation-download":
+        authorized = args.authorize_public_download or os.environ.get(
+            "AUTHORIZED_PUBLIC_DOWNLOAD"
+        ) == "1"
+        if not authorized:
+            parser.error(
+                "liquidation-download requires --authorize-public-download "
+                "or AUTHORIZED_PUBLIC_DOWNLOAD=1"
+            )
+        api_key = os.environ.get(args.api_key_env, "")
+        if not api_key:
+            parser.error(
+                f"liquidation-download requires API key environment variable "
+                f"{args.api_key_env}"
+            )
+        _print_json(
+            download_liquidation_history(
+                args.db,
+                args.raw_root,
+                api_key,
+                workers=args.workers,
+                authorize=authorized,
+                start_date=args.start_date,
+                end_date=args.end_date,
+            )
+        )
+    elif args.command == "liquidation-align":
+        _print_json(align_liquidation_history(args.db, args.raw_root, args.output))
+    elif args.command == "liquidation-status":
+        _print_json(liquidation_ingestion_status(args.raw_root))
+    elif args.command == "liquidation-audit":
+        _print_json(audit_liquidation_history(args.raw_root))
+    elif args.command == "liquidation-alignment-audit":
+        _print_json(audit_liquidation_alignment(args.output))
     elif args.command == "market-factor-catalog":
         _print_json(factor_catalog())
     elif args.command == "market-factor-sample":
@@ -990,6 +1105,7 @@ def main() -> None:
             end=args.end,
             base_market=args.base_market,
             warmup_days=args.warmup_days,
+            include_liquidations=args.include_liquidations,
         )
         _print_json(engine.snapshot(frame, tail=args.tail))
     elif args.command == "factor-evaluate":

@@ -16,6 +16,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+factor-mining = ["matplotlib>=3.7"]
+liquidation-data = [
+  "cryptohftdata==0.7.0",
+  "pyarrow>=15,<26",
+  "zstandard>=0.22,<1",
+]
 
 [project.scripts]
 crypto-quant = "crypto_quant.cli:main"
