@@ -106,11 +106,7 @@ class ResearchSpec:
     min_abs_ic: float
     min_directional_spread: float
     min_stage_share: float
-    rounds: int
-    candidates_per_round: int
-    max_candidates: int
     max_repairs: int
-    max_route_attempts: int
     max_formula_nodes: int
     max_lookback_hours: int
     context_tokens: int
@@ -125,8 +121,7 @@ class ResearchSpec:
         require(a < b < c < end, "expected a_start < b_start < c_start < c_end")
         require(self.label == "perp_next_open_24h", "supported label: perp_next_open_24h")
         positive = ("sample_hours", "groups", "min_symbols", "min_periods", "stage_hours",
-                    "rolling_periods", "rounds", "candidates_per_round", "max_candidates",
-                    "max_route_attempts", "max_formula_nodes", "context_tokens")
+                    "rolling_periods", "max_formula_nodes", "context_tokens")
         for name in positive:
             require(type(getattr(self, name)) is int and getattr(self, name) > 0, f"{name} must be a positive integer")
         for name in ("hac_lags", "max_repairs", "max_lookback_hours"):
@@ -171,21 +166,38 @@ def candidate(value: Any) -> dict[str, Any]:
     return value
 
 
-def design(value: Any, spec: ResearchSpec) -> dict[str, Any]:
-    require(isinstance(value, dict), "experiment design must be an object")
-    expected = {"route_id", "control_id", "evidence", "question", "change", "expected",
-                "metric", "min_improvement", "max_ic_loss", "stop_condition", "pause_condition", "attempt_budget",
+def modification_plan(value: Any) -> dict[str, Any]:
+    require(isinstance(value, dict), "modification plan must be an object")
+    expected = {"route_id", "control_id", "evidence_refs", "modification_task", "experiment_design",
                 "restart_of", "new_evidence"}
-    require(set(value) == expected, "experiment design fields do not match the declared schema")
+    require(set(value) == expected, "modification plan fields do not match the declared schema")
     for name in ("route_id", "control_id"):
         identifier(value[name])
-    for name in ("evidence", "question", "change", "expected", "stop_condition", "pause_condition"):
-        text(value[name], name)
-    require(value["metric"] in {"rank_ic", "directional_spread"}, "primary improvement metric is not supported")
-    require(number(value["min_improvement"], "min_improvement") > 0, "minimum improvement must be positive")
-    require(number(value["max_ic_loss"], "max_ic_loss") >= 0, "maximum IC loss must be nonnegative")
-    require(type(value["attempt_budget"]) is int and 0 < value["attempt_budget"] <= spec.max_route_attempts,
-            "route budget exceeds the run contract")
+    refs = value["evidence_refs"]
+    require(isinstance(refs, list) and bool(refs) and len(refs) == len(set(refs)),
+            "modification evidence references must be a nonempty unique list")
+    for ref in refs:
+        identifier(ref)
+    task = value["modification_task"]
+    task_fields = {"core_hypothesis", "observed_problem", "modification_hypothesis", "change_target",
+                   "fixed_components"}
+    require(isinstance(task, dict) and set(task) == task_fields,
+            "modification task fields do not match the declared schema")
+    for name in task_fields:
+        text(task[name], name)
+    experiment = value["experiment_design"]
+    experiment_fields = {"question", "metric", "min_improvement", "max_ic_loss", "expected_outcome",
+                         "stop_condition", "pause_condition"}
+    require(isinstance(experiment, dict) and set(experiment) == experiment_fields,
+            "experiment design fields do not match the declared schema")
+    for name in ("question", "expected_outcome", "stop_condition", "pause_condition"):
+        text(experiment[name], name)
+    require(experiment["metric"] in {"rank_ic", "directional_spread"},
+            "primary improvement metric is not supported")
+    require(number(experiment["min_improvement"], "min_improvement") > 0,
+            "minimum improvement must be positive")
+    require(number(experiment["max_ic_loss"], "max_ic_loss") >= 0,
+            "maximum IC loss must be nonnegative")
     if value["restart_of"] is None:
         require(value["new_evidence"] is None, "new_evidence applies to a declared route restart")
     else:

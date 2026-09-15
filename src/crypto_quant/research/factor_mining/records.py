@@ -228,7 +228,7 @@ class AgentGateway:
                 # Keep the exact failed text only in the transcript. Extra values are never
                 # fed back; the unchanged task/evidence plus the precise error define the retry.
                 feedback = {"response_error": error, "correction": corrections,
-                            "instruction": "上次回复未被接受，研究状态未提交。按原任务重新返回完整JSON；修正上述错误，精简文字避免截断。轮数或候选预算不足则停止建议新实验。"}
+                            "instruction": "上次回复未被接受，研究状态未提交。按原任务重新返回完整JSON；修正上述错误，精简文字避免截断。没有新增可验证信息则停止建议新实验。"}
                 if messages[-1]["role"] == "user" and "response_error" in json.loads(messages[-1]["content"]):
                     messages[-1]["content"] = dumps(feedback)
                 else:
