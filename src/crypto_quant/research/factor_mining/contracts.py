@@ -115,7 +115,6 @@ class ResearchSpec:
     max_lookback_hours: int
     context_tokens: int
     output_tokens: int | None
-    allowed_changes: tuple[str, ...]
 
     def __post_init__(self) -> None:
         identifier(self.run_id)
@@ -145,10 +144,6 @@ class ResearchSpec:
         if self.output_tokens is not None:
             require(type(self.output_tokens) is int and self.output_tokens > 0, "output_tokens must be null or a positive integer")
             require(self.context_tokens > self.output_tokens, "context must reserve output capacity")
-        require(bool(self.allowed_changes) and len(set(self.allowed_changes)) == len(self.allowed_changes)
-                and set(self.allowed_changes) <= {"window", "smoothing", "field", "operator", "conditioning"},
-                "declare the allowed kinds of formula modification")
-        object.__setattr__(self, "allowed_changes", tuple(self.allowed_changes))
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> ResearchSpec:
@@ -178,7 +173,7 @@ def candidate(value: Any) -> dict[str, Any]:
 
 def design(value: Any, spec: ResearchSpec) -> dict[str, Any]:
     require(isinstance(value, dict), "experiment design must be an object")
-    expected = {"route_id", "control_id", "evidence", "question", "change_kind", "change", "expected",
+    expected = {"route_id", "control_id", "evidence", "question", "change", "expected",
                 "metric", "min_improvement", "max_ic_loss", "stop_condition", "pause_condition", "attempt_budget",
                 "restart_of", "new_evidence"}
     require(set(value) == expected, "experiment design fields do not match the declared schema")
@@ -186,7 +181,6 @@ def design(value: Any, spec: ResearchSpec) -> dict[str, Any]:
         identifier(value[name])
     for name in ("evidence", "question", "change", "expected", "stop_condition", "pause_condition"):
         text(value[name], name)
-    require(value["change_kind"] in spec.allowed_changes, "change is outside the predeclared search scope")
     require(value["metric"] in {"rank_ic", "directional_spread"}, "primary improvement metric is not supported")
     require(number(value["min_improvement"], "min_improvement") > 0, "minimum improvement must be positive")
     require(number(value["max_ic_loss"], "max_ic_loss") >= 0, "maximum IC loss must be nonnegative")
