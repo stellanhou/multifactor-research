@@ -23,6 +23,7 @@ experiments/testnet_sessions/
 
 # Python and local tool caches.
 __pycache__/
+.venv*/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/

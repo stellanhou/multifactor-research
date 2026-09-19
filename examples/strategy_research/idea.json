@@ -1,0 +1,37 @@
+{
+  "id": "manual-btc-eth-momentum-engineering",
+  "source_type": "manual",
+  "source": {
+    "author": "engineering fixture",
+    "date": "2026-09-19"
+  },
+  "original_claim": "工程示例：BTC/ETH中近期较强资产可能延续相对优势。",
+  "economic_mechanism": "待检验的动量持续假说。",
+  "market_and_horizon": {
+    "market": "spot",
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT"
+    ],
+    "interval": "1h"
+  },
+  "data_and_coverage": {
+    "fields": [
+      "open",
+      "high",
+      "low",
+      "close",
+      "quote_volume"
+    ],
+    "coverage": "程序读取本地数据库后核验"
+  },
+  "falsification_conditions": [
+    "成本后收益和相对基准表现不支持假说"
+  ],
+  "unverified_assumptions": [
+    "币种、日期、参数和门槛均为工程示例，未获批作为正式研究合同"
+  ],
+  "next_research_plan": [
+    "验证版本迭代、确定性回测、冻结和验证隔离流程"
+  ]
+}

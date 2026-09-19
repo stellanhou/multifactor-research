@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,8 +28,18 @@ class EvidenceIntegrityError(ValueError):
 
 def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", encoding="utf-8") as handle:
-        handle.write(dumps(value) + "\n")
+    # Commit complete JSON atomically and preserve the existing no-overwrite rule.
+    # A reader or a resumed Goal must never observe half a checkpoint.
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                     prefix=f".{path.name}.", suffix=".tmp", delete=False) as handle:
+        temporary = Path(handle.name)
+        try:
+            handle.write(dumps(value) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            os.link(temporary, path)
+        finally:
+            temporary.unlink()
 
 
 class RecordStore:
@@ -74,6 +86,13 @@ def compact_record(record: dict[str, Any]) -> dict[str, Any]:
     Keep definitions, failures, model prose and decisions verbatim. Large numeric
     tables retain summary evidence and a pointer to every original row.
     """
+    data = record["data"]
+    if record["kind"] == "research_cycle" and "context" in data:
+        data = {**data, "records": {
+            "record_id": record["id"], "pointer": "/records", "rows": len(data["records"]),
+            "read_records": "request an explicit offset and limit to read original run records",
+        }}
+
     def compact(value: Any, pointer: str = "") -> Any:
         if isinstance(value, dict):
             if pointer.endswith("/coverage") and value and all(isinstance(v, dict) and "eligible_rows" in v for v in value.values()):
@@ -85,11 +104,19 @@ def compact_record(record: dict[str, Any]) -> dict[str, Any]:
                     groups[key]["fields"].append(field)
                 return {"encoding": "lossless grouping of fields with identical coverage", "groups": list(groups.values())}
             return {k: compact(v, pointer + "/" + k.replace("~", "~0").replace("/", "~1")) for k, v in value.items()}
-        if isinstance(value, list) and pointer.split("/")[-1] in {"periods", "per_symbol", "factor_values", "cross_section_counts"}:
-            return {"record_id": record["id"], "pointer": pointer, "rows": len(value),
-                    "read_records": "request an explicit offset and limit to read original rows"}
+        if isinstance(value, list):
+            if pointer.split("/")[-1] in {
+                "periods", "per_symbol", "factor_values", "cross_section_counts", "stages",
+            }:
+                return {"record_id": record["id"], "pointer": pointer, "rows": len(value),
+                        "read_records": "request an explicit offset and limit to read original rows"}
+            # Goal research cycles contain immutable run records as a nested list.
+            # Recurse with exact JSON-pointer indices so their numeric tables can
+            # be paged from the enclosing Goal record instead of being copied in
+            # full into every later task-selection request.
+            return [compact(item, f"{pointer}/{index}") for index, item in enumerate(value)]
         return value
-    return {**record, "data": compact(record["data"]), "numeric_tables_paged": True}
+    return {**record, "data": compact(data), "numeric_tables_paged": True}
 
 
 SYSTEM = """你是加密货币因子研究流水线中的一个组件。只完成当前角色任务。
@@ -121,6 +148,12 @@ class AgentGateway:
         self.stage = stage
         self.transcripts = Path(transcripts)
         self.transcripts.mkdir(parents=True, exist_ok=True)
+
+    def _model_record_id(self, call_id: str, suffix: str) -> str:
+        base = f"model-{call_id}-{suffix}"
+        if not (self.store.root / f"{base}.json").exists():
+            return base
+        return f"model-{call_id}-{digest(self.spec.run_id)[:12]}-{suffix}"
 
     def _input_bound(self, messages: list[dict[str, str]]) -> int:
         # Conservative UTF-8 byte upper bound, not a claim to have a provider tokenizer.
@@ -212,14 +245,14 @@ class AgentGateway:
                 error = f"{type(exc).__name__}: {exc}"
             finally:
                 if extra_fields:
-                    self.store.append(f"model-{call_id}-format", "format_deviation", {
+                    self.store.append(self._model_record_id(call_id, "format"), "format_deviation", {
                         "role": role, "extra_fields": extra_fields,
                         "handling": "extra fields excluded; declared fields and business rules still validated",
                         "raw_response": str(response_path.relative_to(self.transcripts.parent)),
                     })
             if error is not None:
                 will_correct = corrections < 2
-                self.store.append(f"model-{call_id}-invalid", "invalid_model_response", {
+                self.store.append(self._model_record_id(call_id, "invalid"), "invalid_model_response", {
                     "role": role, "error": error, "correction": corrections, "will_correct": will_correct,
                     "raw_response": str(response_path.relative_to(self.transcripts.parent))})
                 if not will_correct:

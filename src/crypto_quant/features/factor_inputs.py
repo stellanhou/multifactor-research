@@ -64,8 +64,8 @@ def _fields() -> tuple[InputField, ...]:
                                  f"在(信号时点-{hours}小时, 信号时点]内每个结算事件只计一次",
                                  "历史不足、缺结算或窗口内非法事件为空，附覆盖状态"))
     for name, meaning, unit, dimensions in (
-        ("open_interest_base", "未平仓持仓量，已换算成对应基础币数量", "base_asset", (0, 1, 0, 0)),
-        ("open_interest_value", "未平仓持仓名义价值", "USDT", (1, 0, 0, 0)),
+        ("open_interest_base", "未平仓总量，已换算成对应基础币数量；不含开仓价或多空方向", "base_asset", (0, 1, 0, 0)),
+        ("open_interest_value", "当前未平仓总名义价值；不是历史开仓成本或浮动盈亏", "USDT", (1, 0, 0, 0)),
         ("toptrader_account_long_short_ratio", "保证金余额前20%用户的净多账户数/净空账户数", "ratio", (0, 0, 0, 0)),
         ("toptrader_position_long_short_ratio", "保证金余额前20%用户的净多持仓量/净空持仓量", "ratio", (0, 0, 0, 0)),
         ("global_account_long_short_ratio", "Binance该合约整体净多账户数/净空账户数", "ratio", (0, 0, 0, 0)),

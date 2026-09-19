@@ -1,0 +1,35 @@
+{
+  "run_id": "btc-eth-engineering-replay",
+  "purpose": "engineering",
+  "development_start": "2026-04-01T00:00:00Z",
+  "validation_start": "2026-05-01T00:00:00Z",
+  "validation_end": "2026-06-01T00:00:00Z",
+  "prior_data_use": "工程演示区间，项目可能已在历史研究中使用；不宣称首次独立样本验证。",
+  "parameter_space": {
+    "lookback": [
+      24,
+      72
+    ],
+    "spread_threshold": [
+      0.01
+    ],
+    "min_winner_return": [
+      0.0
+    ]
+  },
+  "costs": {
+    "initial_capital": 10000.0,
+    "fee_bps": 10.0,
+    "slippage_bps": 5.0,
+    "min_trade_fraction": 0.001,
+    "stress_multiplier": 2.0
+  },
+  "gates": {
+    "min_net_return": 0.0,
+    "min_excess_return": 0.0,
+    "max_drawdown": 0.15,
+    "min_traded_bars": 1,
+    "min_stress_return": 0.0
+  },
+  "context_bytes": 200000
+}

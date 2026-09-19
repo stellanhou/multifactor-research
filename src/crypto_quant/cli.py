@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -112,6 +113,9 @@ def main() -> None:
 
     from crypto_quant.research.factor_mining.cli import add_arguments as add_mining_arguments
     add_mining_arguments(subparsers.add_parser("factor-mine", help="因子挖掘、固定批次验证和创意入池"))
+
+    from crypto_quant.research.strategy_research.cli import add_arguments as add_research_arguments
+    add_research_arguments(subparsers.add_parser("strategy-research", help="创意卡驱动的策略研究与冻结验证"))
 
     update = subparsers.add_parser("update-data", help="download public Binance spot klines")
     update.add_argument(
@@ -998,8 +1002,27 @@ def main() -> None:
     multiple_testing.add_argument("--start", default="2019-01-01")
     multiple_testing.add_argument("--test-start", default="2023-01-01")
 
+    scan_live = subparsers.add_parser(
+        "scan-live",
+        help="scan live Binance Spot and USD-M perpetual markets for statistical anomalies",
+    )
+    scan_live.add_argument("--symbols", default=None, help="comma-separated symbols (e.g. BTCUSDT,ETHUSDT)")
+    scan_live.add_argument("--lookback-hours", type=int, default=720)
+    scan_live.add_argument("--high-quantile", type=float, default=0.99)
+    scan_live.add_argument("--low-quantile", type=float, default=0.01)
+    scan_live.add_argument("--idea-pool", type=Path, default=Path("experiments/idea_pool"))
+    scan_live.add_argument("--dry-run", action="store_true")
+    from crypto_quant.research.factor_mining.codex_model import add_model_arguments
+    add_model_arguments(scan_live)
+
     args = parser.parse_args()
-    if args.command == "factor-mine":
+    if args.command == "strategy-research":
+        from crypto_quant.research.strategy_research.cli import execute as execute_research
+        _print_json(execute_research(args))
+    elif args.command == "scan-live":
+        from crypto_quant.scanner.cli import main as execute_scanner
+        sys.exit(execute_scanner(args))
+    elif args.command == "factor-mine":
         from crypto_quant.research.factor_mining.cli import execute as execute_mining
         _print_json(execute_mining(args))
     elif args.command == "data-request-create":
