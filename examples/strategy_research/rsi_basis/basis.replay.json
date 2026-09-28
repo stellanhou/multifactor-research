@@ -1,0 +1,101 @@
+[
+  {
+    "role": "design",
+    "response": {
+      "action": "design",
+      "reason": "固定工程输入，验证策略表达和执行。",
+      "hypothesis": "正基差收敛及资金费能否覆盖双腿成本",
+      "falsification_conditions": [
+        "成本后净收益及压力测试不支持该假说。"
+      ],
+      "parameters": {
+        "entry_basis": 0.001,
+        "exit_basis": 0.0005,
+        "capital_fraction": 0.25
+      },
+      "calculation_meaning": {
+        "inputs": "same-symbol spot and USD-M perpetual trade OHLC plus mark OHLC on identical complete hourly grids; bar t available at t+1h-1ms; no imputation; native funding timestamps, rates, intervals and settlement mark prices required",
+        "signal": "basis=perp trade close/spot close-1; enter when basis >= entry_basis; exit when basis <= exit_basis; otherwise keep state; {\"capital_fraction\":0.25,\"entry_basis\":0.001,\"exit_basis\":0.0005}",
+        "execution": "one pre-start signal bar; previous closed-hour signal executes at next hour open on both trade-price series; funding at the exact open timestamp settles on the old position before trading; later events settle on the new position; end marked at spot close and perp mark close, no forced closing; fees/slippage on both legs; margin checked before trading at mark open and conservatively at hourly mark high without crediting positive intrahour funding; guard breach stops with partial ledger, not an invented liquidation fill",
+        "position": "long spot and equal base quantity short linear USDT perpetual; quantities fixed until close; spot entry notional=capital_fraction*equity; reserve 100% of perp entry notional as cash collateral; short notional is never credited as sale proceeds; no leverage, borrowing or collateral top-ups; margin guard ratio=0.1 of current short mark notional; this is not historical exchange margin tiers",
+        "costs": "same fee_bps and slippage_bps charged separately on each leg; stress multiplies both by stress_multiplier; funding cashflow for short=quantity*event mark price*rate; funding is never multiplied by fee stress; {\"fee_bps\":10.0,\"initial_capital\":10000.0,\"min_trade_fraction\":0,\"slippage_bps\":5.0,\"stress_multiplier\":2.0}",
+        "parameters": "symbol and margin guard fixed by contract; only {\"capital_fraction\":0.25,\"entry_basis\":0.001,\"exit_basis\":0.0005} are model choices"
+      }
+    }
+  },
+  {
+    "role": "calculate",
+    "response": {
+      "version": "v0001",
+      "plan_sha256": "2738e59b6f5d00eb7dfb9c33a6f3047ba2563bf9da58d7aed5c134549e582de9",
+      "consistent": true,
+      "checks": {
+        "inputs": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "signal": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "execution": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "position": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "costs": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "parameters": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        }
+      },
+      "hypothesis_matches": true,
+      "hypothesis_reason": "固定工程回放：核对本策略定义及实际程序步骤。",
+      "evidence_refs": [
+        "v0001-definition"
+      ]
+    }
+  },
+  {
+    "role": "review",
+    "response": {
+      "summary": "固定回放解释，实际数值以程序实验记录为准。",
+      "supporting_evidence": [
+        "本回复不预设实际收益方向。"
+      ],
+      "counter_evidence": [
+        "应检查程序记录的费用、回撤和相对基准表现。"
+      ],
+      "limitations": [
+        "未由真实模型分析；开发段属于适应性研究。"
+      ],
+      "evidence_refs": [
+        "v0001-experiment"
+      ]
+    }
+  },
+  {
+    "role": "decide",
+    "response": {
+      "action": "retain",
+      "reason": "工程回放保留以检查独立验证入口，不构成研究结论。",
+      "research_basis": "引用当前程序实验和评估记录，固定回复不声称研究有效。",
+      "modification_hypothesis": "本次无修改，固定回复只验收工程路径。",
+      "verifiable_improvement": "实际表现以程序记录为准。",
+      "attempt_value": "核对单版开发流程及数据交接。",
+      "evidence_refs": [
+        "v0001-experiment",
+        "v0001-review"
+      ],
+      "selected_version": "v0001",
+      "modification": null,
+      "resume_condition": null
+    }
+  }
+]

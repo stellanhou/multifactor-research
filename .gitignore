@@ -20,6 +20,7 @@ experiments/futures_demo_sessions/
 experiments/runs/
 experiments/shadow_sessions/
 experiments/testnet_sessions/
+experiments/web_console/
 
 # Python and local tool caches.
 __pycache__/

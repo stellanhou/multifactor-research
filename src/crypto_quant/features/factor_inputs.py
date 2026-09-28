@@ -18,8 +18,6 @@ class InputField:
     name: str
     meaning: str
     unit: str
-    # Powers of USDT, this asset's base unit, hours, and counts.
-    dimensions: tuple[int, int, int, int]
     source: str
     native_frequency: str
     alignment: str
@@ -32,55 +30,55 @@ def _fields() -> tuple[InputField, ...]:
         for column, meaning in (("open", "开盘价"), ("high", "最高价"), ("low", "最低价"), ("close", "收盘价")):
             result.append(InputField(
                 f"{prefix}_{column}", f"{market}当小时{meaning}", "USDT / base_asset",
-                (1, -1, 0, 0), prefix, "1h", "该小时K线已结束且close_time不晚于信号时点",
+                prefix, "1h", "该小时K线已结束且close_time不晚于信号时点",
                 "缺失或非有限值为空，不补前值",
             ))
-        for column, meaning, unit, dimensions in (
-            ("volume", "成交基础币数量", "base_asset", (0, 1, 0, 0)),
-            ("quote_volume", "成交额", "USDT", (1, 0, 0, 0)),
-            ("taker_buy_base_volume", "主动买入基础币数量", "base_asset", (0, 1, 0, 0)),
-            ("taker_buy_quote_volume", "主动买入成交额", "USDT", (1, 0, 0, 0)),
-            ("trades", "成交笔数", "count", (0, 0, 0, 1)),
+        for column, meaning, unit in (
+            ("volume", "成交基础币数量", "base_asset"),
+            ("quote_volume", "成交额", "USDT"),
+            ("taker_buy_base_volume", "主动买入基础币数量", "base_asset"),
+            ("taker_buy_quote_volume", "主动买入成交额", "USDT"),
+            ("trades", "成交笔数", "count"),
         ):
             result.append(InputField(
-                f"{prefix}_{column}", f"{market}当小时{meaning}", unit, dimensions,
+                f"{prefix}_{column}", f"{market}当小时{meaning}", unit,
                 prefix, "1h", "同一已结束小时的区间合计", "缺失或非法值为空，真实零保留",
             ))
     for name, meaning in (("mark_close", "永续标记价格"), ("index_close", "永续指数价格")):
         result.append(InputField(name, f"当小时结束时的{meaning}", "USDT / base_asset",
-                                 (1, -1, 0, 0), name.split("_")[0], "1h",
+                                 name.split("_")[0], "1h",
                                  "该小时K线已结束且close_time不晚于信号时点", "缺失或非有限值为空"))
-    result.append(InputField("premium_index", "交易所溢价指数收盘值", "ratio", (0, 0, 0, 0),
+    result.append(InputField("premium_index", "交易所溢价指数收盘值", "ratio",
                              "premium_index", "1h", "已结束小时的收盘值", "缺失或非有限值为空"))
-    for name, meaning, unit, dimensions in (
-        ("funding_rate", "最近已知结算事件的资金费率；正值多头付给空头", "rate_per_settlement", (0, 0, 0, 0)),
-        ("funding_interval_hours", "这期费率对应的结算间隔", "hour", (0, 0, 1, 0)),
+    for name, meaning, unit in (
+        ("funding_rate", "最近已知结算事件的资金费率；正值多头付给空头", "rate_per_settlement"),
+        ("funding_interval_hours", "这期费率对应的结算间隔", "hour"),
     ):
-        result.append(InputField(name, meaning, unit, dimensions, "funding", "原生结算周期",
+        result.append(InputField(name, meaning, unit, "funding", "原生结算周期",
                                  "截至信号时点最近已知的结算事件，非下一期预测费率", "无已知事件或非法值为空"))
     for period, hours in (("24h", 24), ("7d", 168)):
         result.append(InputField(f"funding_{period}_sum", f"过去{hours}小时实际结算费率之和", "rate_sum",
-                                 (0, 0, 0, 0), "funding", "原生结算周期",
+                                 "funding", "原生结算周期",
                                  f"在(信号时点-{hours}小时, 信号时点]内每个结算事件只计一次",
                                  "历史不足、缺结算或窗口内非法事件为空，附覆盖状态"))
-    for name, meaning, unit, dimensions in (
-        ("open_interest_base", "未平仓总量，已换算成对应基础币数量；不含开仓价或多空方向", "base_asset", (0, 1, 0, 0)),
-        ("open_interest_value", "当前未平仓总名义价值；不是历史开仓成本或浮动盈亏", "USDT", (1, 0, 0, 0)),
-        ("toptrader_account_long_short_ratio", "保证金余额前20%用户的净多账户数/净空账户数", "ratio", (0, 0, 0, 0)),
-        ("toptrader_position_long_short_ratio", "保证金余额前20%用户的净多持仓量/净空持仓量", "ratio", (0, 0, 0, 0)),
-        ("global_account_long_short_ratio", "Binance该合约整体净多账户数/净空账户数", "ratio", (0, 0, 0, 0)),
+    for name, meaning, unit in (
+        ("open_interest_base", "未平仓总量，已换算成对应基础币数量；不含开仓价或多空方向", "base_asset"),
+        ("open_interest_value", "当前未平仓总名义价值；不是历史开仓成本或浮动盈亏", "USDT"),
+        ("toptrader_account_long_short_ratio", "保证金余额前20%用户的净多账户数/净空账户数", "ratio"),
+        ("toptrader_position_long_short_ratio", "保证金余额前20%用户的净多持仓量/净空持仓量", "ratio"),
+        ("global_account_long_short_ratio", "Binance该合约整体净多账户数/净空账户数", "ratio"),
     ):
-        result.append(InputField(name, meaning, unit, dimensions, "metrics", "5m",
+        result.append(InputField(name, meaning, unit, "metrics", "5m",
                                  "小时结束前最近一条有效快照；非小时均值",
                                  "最新记录逐字段保留缺失；年龄达到5分钟后过期，不查找更早非空值"))
-    for name, meaning, unit, dimensions in (
-        ("long_liquidation_notional_usdt", "观察到的多头清算名义金额", "USDT", (1, 0, 0, 0)),
-        ("short_liquidation_notional_usdt", "观察到的空头清算名义金额", "USDT", (1, 0, 0, 0)),
-        ("long_liquidation_count", "观察到的多头清算记录数", "count", (0, 0, 0, 1)),
-        ("short_liquidation_count", "观察到的空头清算记录数", "count", (0, 0, 0, 1)),
-        ("liquidation_event_count", "观察到的全部清算记录数，非人数", "count", (0, 0, 0, 1)),
+    for name, meaning, unit in (
+        ("long_liquidation_notional_usdt", "观察到的多头清算名义金额", "USDT"),
+        ("short_liquidation_notional_usdt", "观察到的空头清算名义金额", "USDT"),
+        ("long_liquidation_count", "观察到的多头清算记录数", "count"),
+        ("short_liquidation_count", "观察到的空头清算记录数", "count"),
+        ("liquidation_event_count", "观察到的全部清算记录数，非人数", "count"),
     ):
-        result.append(InputField(name, meaning, unit, dimensions, "liquidations", "逐事件",
+        result.append(InputField(name, meaning, unit, "liquidations", "逐事件",
                                  "按事件小时汇总，实际接收时间不晚于小时信号时点",
                                  "按需接入；未知或晚到为空；异常金额不抹去有效次数；确认无事件才为零"))
     return tuple(result)
@@ -97,11 +95,11 @@ DEFERRED_FIELDS = {
 
 def input_catalog() -> dict[str, Any]:
     return {
-        "contract_version": "crypto_factor_inputs_v1",
+        "contract_version": "crypto_factor_inputs_v2",
         "exchange": "Binance", "quote_asset": "USDT", "interval": "1h", "timezone": "UTC",
         "fields": [asdict(field) for field in INPUT_FIELDS],
         "deferred_fields": dict(DEFERRED_FIELDS),
-        "unit_rules": "显式倍率下价格除以倍率，基础币数量乘以倍率；USDT金额、费率、比例和次数不缩放。不同资产的基础币单位不能直接比较规模。",
+        "unit_rules": "显式倍率下价格除以倍率，基础币数量乘以倍率；USDT金额、费率、比例和次数不缩放。基础币单位分别对应各自资产，公式不做单位检查。",
         "availability_assumption": "K线用收盘时点，资金费率/持仓按源时间；后两者无独立历史发布延迟记录。清算另检查实际接收时间。",
         "labels": "未来收益标签仅供评估，禁止进入因子公式",
     }

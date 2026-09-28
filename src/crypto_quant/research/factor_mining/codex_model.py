@@ -20,18 +20,6 @@ DEFAULT_MODEL = "gpt-5.6-luna"
 PROVIDER = "codex-sdk-chatgpt"
 
 
-def add_model_arguments(parser, *, include_model=True):
-    if include_model:
-        parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--reasoning-effort", choices=("low", "medium", "high", "xhigh", "max"), default="max")
-    parser.add_argument("--timeout-seconds", type=int, default=300)
-
-
-def model_from_args(args):
-    return CodexModel(args.model, reasoning_effort=args.reasoning_effort,
-                      timeout_seconds=args.timeout_seconds)
-
-
 def _config(directory):
     # These are process-local overrides: the user's Codex settings and login stay intact.
     # Research evidence is supplied explicitly. Codex may retain its global AGENTS.md;

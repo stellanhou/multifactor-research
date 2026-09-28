@@ -104,7 +104,7 @@ def _print_json(value: object) -> None:
     print(json.dumps(value, indent=2, ensure_ascii=False))
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="crypto-quant",
         description="Personal crypto quant research system",
@@ -1012,10 +1012,23 @@ def main() -> None:
     scan_live.add_argument("--low-quantile", type=float, default=0.01)
     scan_live.add_argument("--idea-pool", type=Path, default=Path("experiments/idea_pool"))
     scan_live.add_argument("--dry-run", action="store_true")
-    from crypto_quant.research.factor_mining.codex_model import add_model_arguments
+    scan_live.add_argument("--once", action="store_true", help="run the previous one-shot 1h scan")
+    scan_live.add_argument("--host", default="127.0.0.1", help="loopback address for scanner status API")
+    scan_live.add_argument("--port", type=int, default=8765, help="scanner status API port")
+    from crypto_quant.research.factor_mining.model_config import add_model_arguments
     add_model_arguments(scan_live)
 
+    subparsers.add_parser("research-data-policy", help="show shared factor/strategy data purposes and UTC boundaries")
+    return parser
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
+    if args.command == "research-data-policy":
+        from crypto_quant.research.data_policy import policy_catalog
+        _print_json(policy_catalog())
+        return
     if args.command == "strategy-research":
         from crypto_quant.research.strategy_research.cli import execute as execute_research
         _print_json(execute_research(args))

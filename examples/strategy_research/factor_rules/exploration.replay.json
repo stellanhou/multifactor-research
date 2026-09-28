@@ -1,0 +1,134 @@
+[
+  {
+    "role": "design",
+    "response": {
+      "action": "propose",
+      "reason": "固定工程输入，验证策略表达和执行。",
+      "hypothesis": "价量规则可能产生成本后收益，需程序检验。",
+      "falsification_conditions": [
+        "扣费后结果及成本压力表现不支持动量假说。"
+      ],
+      "parameters": {
+        "family": "factor_rule_spot",
+        "symbols": [
+          "BTCUSDT",
+          "ETHUSDT"
+        ],
+        "required_fields": [
+          "spot_close",
+          "spot_quote_volume"
+        ],
+        "required_capabilities": [
+          "spot_long_cash",
+          "next_hour_open",
+          "equal_weight_capped",
+          "periodic_rebalance"
+        ],
+        "definition": {
+          "signals": [
+            {
+              "name": "momentum",
+              "expression": "ts_return(spot_close,24)"
+            },
+            {
+              "name": "activity",
+              "expression": "sub(div(spot_quote_volume,ts_mean(spot_quote_volume,24)),1)"
+            }
+          ],
+          "score": "add(momentum,mul(0.1,activity))",
+          "entry": "momentum",
+          "exit": "neg(momentum)",
+          "allocation": {
+            "max_positions": 2,
+            "gross_exposure": 0.8,
+            "max_asset_weight": 0.5
+          },
+          "rebalance_hours": 24
+        }
+      },
+      "calculation_meaning": {
+        "inputs": "BTCUSDT and ETHUSDT spot 1h OHLC and quote_volume; complete common hourly grid; bar t is available at t+1h-1ms; no missing-bar filling; supported formula inputs=spot_open,spot_high,spot_low,spot_close,spot_volume,spot_quote_volume",
+        "signal": "Agent defines named signal expressions, score, entry and exit using causal operators; score/entry/exit must be dimensionless; entry > 0 admits a new holding; exit > 0 takes precedence; rules are checked only at rebalance times; undefined rule values stop execution; expanded rules={\"entry\":{\"expanded_expression\":\"ts_return(spot_close, 24)\",\"expression\":\"ts_return(spot_close, 24)\",\"fields\":[\"spot_close\"],\"lookback_hours\":24,\"steps\":[{\"availability\":\"该小时K线已结束且close_time不晚于信号时点\",\"expression\":\"spot_close\",\"field\":\"spot_close\",\"market\":\"spot\",\"meaning\":\"现货当小时收盘价\",\"step\":1,\"unit\":\"USDT / base_asset\"},{\"constant\":24.0,\"expression\":\"24\",\"step\":2,\"unit\":\"dimensionless\"},{\"arguments\":[1,2],\"current_period\":\"includes the current completed hour of each input expression\",\"expression\":\"ts_return(spot_close, 24)\",\"meaning\":\"当前/n小时前-1，零分母为空\",\"operator\":\"ts_return\",\"scope\":\"timeseries\",\"step\":3,\"unit\":\"dimensionless\",\"window_hours\":24}],\"unit\":\"dimensionless\"},\"exit\":{\"expanded_expression\":\"neg(ts_return(spot_close, 24))\",\"expression\":\"neg(ts_return(spot_close, 24))\",\"fields\":[\"spot_close\"],\"lookback_hours\":24,\"steps\":[{\"availability\":\"该小时K线已结束且close_time不晚于信号时点\",\"expression\":\"spot_close\",\"field\":\"spot_close\",\"market\":\"spot\",\"meaning\":\"现货当小时收盘价\",\"step\":1,\"unit\":\"USDT / base_asset\"},{\"constant\":24.0,\"expression\":\"24\",\"step\":2,\"unit\":\"dimensionless\"},{\"arguments\":[1,2],\"current_period\":\"includes the current completed hour of each input expression\",\"expression\":\"ts_return(spot_close, 24)\",\"meaning\":\"当前/n小时前-1，零分母为空\",\"operator\":\"ts_return\",\"scope\":\"timeseries\",\"step\":3,\"unit\":\"dimensionless\",\"window_hours\":24},{\"arguments\":[3],\"expression\":\"neg(ts_return(spot_close, 24))\",\"meaning\":\"取负\",\"operator\":\"neg\",\"scope\":\"pointwise\",\"step\":4,\"unit\":\"dimensionless\"}],\"unit\":\"dimensionless\"},\"score\":{\"expanded_expression\":\"add(ts_return(spot_close, 24), mul(0.1, sub(div(spot_quote_volume, ts_mean(spot_quote_volume, 24)), 1)))\",\"expression\":\"add(ts_return(spot_close, 24), mul(0.1, sub(div(spot_quote_volume, ts_mean(spot_quote_volume, 24)), 1)))\",\"fields\":[\"spot_close\",\"spot_quote_volume\"],\"lookback_hours\":24,\"steps\":[{\"availability\":\"该小时K线已结束且close_time不晚于信号时点\",\"expression\":\"spot_close\",\"field\":\"spot_close\",\"market\":\"spot\",\"meaning\":\"现货当小时收盘价\",\"step\":1,\"unit\":\"USDT / base_asset\"},{\"constant\":24.0,\"expression\":\"24\",\"step\":2,\"unit\":\"dimensionless\"},{\"arguments\":[1,2],\"current_period\":\"includes the current completed hour of each input expression\",\"expression\":\"ts_return(spot_close, 24)\",\"meaning\":\"当前/n小时前-1，零分母为空\",\"operator\":\"ts_return\",\"scope\":\"timeseries\",\"step\":3,\"unit\":\"dimensionless\",\"window_hours\":24},{\"constant\":0.1,\"expression\":\"0.1\",\"step\":4,\"unit\":\"dimensionless\"},{\"availability\":\"同一已结束小时的区间合计\",\"expression\":\"spot_quote_volume\",\"field\":\"spot_quote_volume\",\"market\":\"spot\",\"meaning\":\"现货当小时成交额\",\"step\":5,\"unit\":\"USDT\"},{\"availability\":\"同一已结束小时的区间合计\",\"expression\":\"spot_quote_volume\",\"field\":\"spot_quote_volume\",\"market\":\"spot\",\"meaning\":\"现货当小时成交额\",\"step\":6,\"unit\":\"USDT\"},{\"constant\":24.0,\"expression\":\"24\",\"step\":7,\"unit\":\"dimensionless\"},{\"arguments\":[6,7],\"current_period\":\"includes the current completed hour of each input expression\",\"expression\":\"ts_mean(spot_quote_volume, 24)\",\"meaning\":\"完整n小时窗口均值，含当前已结束小时\",\"operator\":\"ts_mean\",\"scope\":\"timeseries\",\"step\":8,\"unit\":\"USDT\",\"window_hours\":24},{\"arguments\":[5,8],\"expression\":\"div(spot_quote_volume, ts_mean(spot_quote_volume, 24))\",\"meaning\":\"相除，零分母为空\",\"operator\":\"div\",\"scope\":\"pointwise\",\"step\":9,\"unit\":\"dimensionless\"},{\"constant\":1.0,\"expression\":\"1\",\"step\":10,\"unit\":\"dimensionless\"},{\"arguments\":[9,10],\"expression\":\"sub(div(spot_quote_volume, ts_mean(spot_quote_volume, 24)), 1)\",\"meaning\":\"相容单位相减\",\"operator\":\"sub\",\"scope\":\"pointwise\",\"step\":11,\"unit\":\"dimensionless\"},{\"arguments\":[4,11],\"expression\":\"mul(0.1, sub(div(spot_quote_volume, ts_mean(spot_quote_volume, 24)), 1))\",\"meaning\":\"相乘，单位相乘\",\"operator\":\"mul\",\"scope\":\"pointwise\",\"step\":12,\"unit\":\"dimensionless\"},{\"arguments\":[3,12],\"expression\":\"add(ts_return(spot_close, 24), mul(0.1, sub(div(spot_quote_volume, ts_mean(spot_quote_volume, 24)), 1)))\",\"meaning\":\"相容单位相加\",\"operator\":\"add\",\"scope\":\"pointwise\",\"step\":13,\"unit\":\"dimensionless\"}],\"unit\":\"dimensionless\"}}",
+        "execution": "closed-hour target executes at next hour open; sell before buy; each segment starts from fresh cash; one pre-start signal bar; final close valuation without forced liquidation; rebalance every 24 hours anchored at the one pre-start signal bar; start with no selected holdings; a scheduled fill on a synthetic hour waits for the next real hour",
+        "position": "spot long/cash; eligible holdings ranked by descending score, ties by ascending symbol; keep at most max_positions; equal weight min(gross_exposure/count, max_asset_weight); unallocated capital stays in cash; no trading between scheduled rebalances; actual buys constrained by available cash including fees; allocation={\"gross_exposure\":0.8,\"max_asset_weight\":0.5,\"max_positions\":2}",
+        "costs": "costs={\"fee_bps\":10.0,\"initial_capital\":10000.0,\"min_trade_fraction\":0.001,\"slippage_bps\":5.0,\"stress_multiplier\":2.0}; stress multiplies both fees and slippage; benchmark uses 50/50 hourly targets with the same base costs and no-trade band",
+        "parameters": "complete executable strategy definition={\"allocation\":{\"gross_exposure\":0.8,\"max_asset_weight\":0.5,\"max_positions\":2},\"entry\":\"momentum\",\"exit\":\"neg(momentum)\",\"rebalance_hours\":24,\"score\":\"add(momentum,mul(0.1,activity))\",\"signals\":[{\"expression\":\"ts_return(spot_close,24)\",\"name\":\"momentum\"},{\"expression\":\"sub(div(spot_quote_volume,ts_mean(spot_quote_volume,24)),1)\",\"name\":\"activity\"}]}"
+      }
+    }
+  },
+  {
+    "role": "calculate",
+    "response": {
+      "version": "v0001",
+      "plan_sha256": "511bbfe656061c6eff09c0a1c61f32d6f8b4aa3a7b23f1f12e6c79882d147c1a",
+      "consistent": true,
+      "checks": {
+        "inputs": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "signal": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "execution": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "position": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "costs": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "parameters": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        }
+      },
+      "hypothesis_matches": true,
+      "hypothesis_reason": "固定回放核对轮动假说；第二版本仅改变窗口。",
+      "evidence_refs": [
+        "v0001-definition"
+      ]
+    }
+  },
+  {
+    "role": "review",
+    "response": {
+      "summary": "固定回放解释，实际数值以程序实验记录为准。",
+      "supporting_evidence": [
+        "本回复不预设实际收益方向。"
+      ],
+      "counter_evidence": [
+        "应检查程序记录的费用、回撤和相对基准表现。"
+      ],
+      "limitations": [
+        "未由真实模型分析；开发段属于适应性研究。"
+      ],
+      "evidence_refs": [
+        "v0001-experiment"
+      ]
+    }
+  },
+  {
+    "role": "decide",
+    "response": {
+      "action": "retain",
+      "reason": "工程回放保留以检查独立验证入口，不构成研究结论。",
+      "research_basis": "引用当前程序实验和评估记录，固定回复不声称研究有效。",
+      "modification_hypothesis": "较长窗口可能改变信号稳定性。",
+      "verifiable_improvement": "同一开发区间比较净收益及回撤变化。",
+      "attempt_value": "工程验收一次版本派生与原版保留。",
+      "evidence_refs": [
+        "v0001-experiment",
+        "v0001-review"
+      ],
+      "selected_version": "v0001",
+      "modification": null,
+      "resume_condition": null
+    }
+  }
+]

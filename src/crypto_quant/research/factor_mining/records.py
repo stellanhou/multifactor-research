@@ -6,12 +6,17 @@ import json
 import os
 import tempfile
 import time
+from crypto_quant.research.factor_mining.runtime import invoke_role, GRAPH_CONFIG
+from langchain_core.tools import StructuredTool
+from langgraph.graph import StateGraph, START, END
+
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from .contracts import ResearchSpec, digest, dumps, identifier, model_fields, require
 from .model import ApiCallError, JsonModel, ModelReply
+from crypto_quant.research.progress import ProgressLog
 
 
 class ModelResponseError(ValueError):
@@ -23,7 +28,7 @@ class ContextBudgetError(ValueError):
 
 
 class EvidenceIntegrityError(ValueError):
-    """Stored evidence changed; never send this back as a model correction."""
+    """Stored evidence cannot be parsed; never send this back as a model correction."""
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -59,11 +64,9 @@ class RecordStore:
     def _load(self, path: Path) -> dict[str, Any]:
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
-            actual, expected = digest(record["data"]), record["sha256"]
-        except (ValueError, KeyError, TypeError) as exc:
+            require(isinstance(record, dict) and "data" in record, "research record is invalid")
+        except ValueError as exc:
             raise EvidenceIntegrityError("research record is invalid") from exc
-        if actual != expected:
-            raise EvidenceIntegrityError("research record was changed")
         return record
 
     def read(self, record_id: str, pointer: str, offset: int, limit: int) -> Any:
@@ -80,18 +83,33 @@ class RecordStore:
         return value
 
 
-def compact_record(record: dict[str, Any]) -> dict[str, Any]:
-    """Used ONLY after the entire exact request exceeds its declared budget.
+def compact_record(record: dict[str, Any], *, page_cycle_candidates: bool = False) -> dict[str, Any]:
+    """Keep a traceable summary while paging bulky saved evidence.
 
-    Keep definitions, failures, model prose and decisions verbatim. Large numeric
-    tables retain summary evidence and a pointer to every original row.
+    Goal cycle indexes use this without changing the archived original. Model
+    requests use it when their exact contents exceed the declared budget.
     """
     data = record["data"]
     if record["kind"] == "research_cycle" and "context" in data:
-        data = {**data, "records": {
-            "record_id": record["id"], "pointer": "/records", "rows": len(data["records"]),
-            "read_records": "request an explicit offset and limit to read original run records",
-        }}
+        if isinstance(data["records"], list):
+            data = {**data, "records": {
+                "record_id": record["id"], "pointer": "/records", "rows": len(data["records"]),
+                "read_records": "request an explicit offset and limit to read original run records",
+            }}
+        if page_cycle_candidates:
+            context = data["context"]
+            data["context"] = {**context, "candidates": {
+                "record_id": record["id"], "pointer": "/context/candidates",
+                "rows": len(context["candidates"]),
+                "read_records": "request an explicit offset and limit to read original candidate summaries",
+            }}
+    if record["kind"] == "goal_context" and "prior_A_research" in data:
+        prior = data["prior_A_research"]
+        cycles = prior["cycles"]
+        data = {**data, "prior_A_research": {**prior, "cycles": {
+            "record_id": record["id"], "pointer": "/prior_A_research/cycles", "rows": len(cycles),
+            "read_records": "request an explicit offset and limit to read original prior A cycle summaries",
+        }}}
 
     def compact(value: Any, pointer: str = "") -> Any:
         if isinstance(value, dict):
@@ -136,18 +154,22 @@ ENVELOPE_SCHEMA = {"type": "object", "required": ["result", "read_records"], "pr
     "read_records": {"type": "array", "items": {
         "type": "object", "required": ["record_id", "pointer", "offset", "limit"],
         "properties": {"record_id": {"type": "string"}, "pointer": {"type": "string"},
-                       "offset": {"type": "integer"}, "limit": {"type": "integer"}},
+                       "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}},
     }},
 }}
 
 
 class AgentGateway:
-    def __init__(self, model: JsonModel, spec: ResearchSpec, store: RecordStore, transcripts: Path, stage: str = "A"):
+    def __init__(self, model: JsonModel, spec: ResearchSpec, store: RecordStore, transcripts: Path,
+                 stage: str = "A", progress: ProgressLog | None = None):
         self.model, self.spec, self.store = model, spec, store
         require(stage in {"A", "B"}, "model access to C is prohibited")
         self.stage = stage
         self.transcripts = Path(transcripts)
         self.transcripts.mkdir(parents=True, exist_ok=True)
+        self.progress = progress or (ProgressLog.for_run(self.transcripts.parent)
+                                     if self.transcripts.name == "model_calls"
+                                     else ProgressLog(self.transcripts.parent / "progress.jsonl"))
 
     def _model_record_id(self, call_id: str, suffix: str) -> str:
         base = f"model-{call_id}-{suffix}"
@@ -169,14 +191,16 @@ class AgentGateway:
                 "input_token_upper_bound": self._input_bound(messages), "output_tokens": self.spec.output_tokens,
                 "attempt": attempt + 1, "retry_of": f"{first_call:05d}" if attempt else None})
             try:
-                reply = self.model.complete(messages, max_output_tokens=self.spec.output_tokens,
-                                            session_id=f"factor-{self.spec.run_id}-{role}")
-                write_json(prefix.with_name(prefix.name + "-response.json"), vars(reply))
-                if reply.text is None or not reply.text.strip():
-                    raise ApiCallError("model returned empty text", retryable=reply.finish_reason in {
-                        "stop", "end_turn", "length", "max_tokens"},
-                        diagnostics={"finish_reason": reply.finish_reason, "usage": reply.usage})
-                return reply
+                with self.progress.span("factor.model_call", heartbeat=True, stage=self.stage,
+                                        role=role, attempt=attempt + 1):
+                    reply = invoke_role(self.model, messages, max_output_tokens=self.spec.output_tokens,
+                                                session_id=f"factor-{self.spec.run_id}-{role}")
+                    write_json(prefix.with_name(prefix.name + "-response.json"), vars(reply))
+                    if reply.text is None or not reply.text.strip():
+                        raise ApiCallError("model returned empty text", retryable=reply.finish_reason in {
+                            "stop", "end_turn", "length", "max_tokens"},
+                            diagnostics={"finish_reason": reply.finish_reason, "usage": reply.usage})
+                    return reply
             except ApiCallError as exc:
                 will_retry = exc.retryable and attempt < 5
                 delay = 2 ** attempt if will_retry else 0
@@ -187,11 +211,15 @@ class AgentGateway:
                     else "retries_exhausted"})
                 if not will_retry:
                     raise
-                time.sleep(delay)
+                self.progress.emit("retry", "factor.model_call", stage=self.stage, role=role,
+                                   next_attempt=attempt + 2, delay_seconds=delay)
+                with self.progress.span("factor.retry_wait", heartbeat=True, role=role,
+                                        next_attempt=attempt + 2):
+                    time.sleep(delay)
 
     def ask(self, role: str, task: str, payload: Any, schema: Any,
             validate: Callable[[dict[str, Any]], Any] | None = None) -> dict[str, Any]:
-        """Correct invalid model output twice. Validators must not mutate research state."""
+        """Graph-routed evidence requests and corrections; validate before commit."""
         require(self.stage == "A" or role == "evaluator", "B results cannot feed ideation or optimization")
         records = self.store.all()
         content = {"role": role, "task": task, "contract": self.spec.as_dict(),
@@ -199,23 +227,36 @@ class AgentGateway:
         system = SYSTEM if self.stage == "A" else SYSTEM.replace(
             "探索只使用A，禁止请求B/C。", "当前仅解释冻结候选的B段验证及与A的对照，禁止修改候选或请求C。")
         messages = [{"role": "system", "content": system}, {"role": "user", "content": dumps(content)}]
+        envelope_schema = {**ENVELOPE_SCHEMA, "properties": {**ENVELOPE_SCHEMA["properties"],
+            "result": {"anyOf": [schema, {"type": "null"}]}}}
         budget = self.spec.context_tokens
         if self.spec.output_tokens is not None:
             budget -= self.spec.output_tokens
-        context_mode = "full"
+        context_mode = "archived_cycles_paged" if any(
+            record.get("numeric_tables_paged") for record in records) else "full"
         if self._input_bound(messages) > budget:
             content["records"] = [compact_record(record) for record in records]
             context_mode = "numeric_tables_paged"
             messages[1]["content"] = dumps(content)
-        corrections = 0
-        while True:
-            if self._input_bound(messages) > budget:
+        if self._input_bound(messages) > budget:
+            content["records"] = [compact_record(record, page_cycle_candidates=True) for record in records]
+            context_mode = "cycle_candidates_paged"
+            messages[1]["content"] = dumps(content)
+        read_evidence = StructuredTool.from_function(self.store.read, name="read_research_evidence",
+            description="Read one authorized immutable research record by JSON pointer and page.")
+
+        def request(state):
+            if self._input_bound(state["messages"]) > budget:
                 raise ContextBudgetError("context budget exceeded; all original evidence is retained, no silent truncation")
-            reply = self._request(role, messages, context_mode)
+            reply = self._request(role, state["messages"], context_mode)
             # Content filtering and unsupported protocol endings are not format errors.
             if reply.finish_reason not in {"stop", "end_turn", "length", "max_tokens"}:
                 raise ApiCallError(f"model output unfinished: {reply.finish_reason}", retryable=False,
                                    diagnostics={"finish_reason": reply.finish_reason})
+            return {**state, "reply": reply}
+
+        def check(state):
+            messages, corrections, reply = state["messages"], state["corrections"], state["reply"]
             response_path = max(self.transcripts.glob("*-response.json"))
             call_id = response_path.name.split("-", 1)[0]
             extra_fields: list[str] = []
@@ -223,10 +264,9 @@ class AgentGateway:
             try:
                 require(reply.finish_reason in {"stop", "end_turn"}, f"model output unfinished: {reply.finish_reason}")
                 envelope = json.loads(reply.text)
-                envelope = model_fields(envelope, ENVELOPE_SCHEMA, extra_fields)
+                envelope = model_fields(envelope, envelope_schema, extra_fields)
                 if not envelope["read_records"]:
                     require(isinstance(envelope["result"], dict), "role result must be an object")
-                    envelope["result"] = model_fields(envelope["result"], schema, extra_fields, "/result")
                     if validate is not None:
                         validate(envelope["result"])
                 else:
@@ -235,7 +275,7 @@ class AgentGateway:
                     for request in envelope["read_records"]:
                         require(request["record_id"] in {r["id"] for r in records}, "unknown evidence record ID")
                         try:
-                            data = self.store.read(**request)
+                            data = read_evidence.invoke(request)
                         except (KeyError, IndexError, TypeError) as exc:
                             raise ValueError(f"invalid evidence pointer: {request['pointer']}") from exc
                         evidence.append({**request, "data": data})
@@ -251,12 +291,9 @@ class AgentGateway:
                         "raw_response": str(response_path.relative_to(self.transcripts.parent)),
                     })
             if error is not None:
-                will_correct = corrections < 2
                 self.store.append(self._model_record_id(call_id, "invalid"), "invalid_model_response", {
-                    "role": role, "error": error, "correction": corrections, "will_correct": will_correct,
+                    "role": role, "error": error, "correction": corrections, "will_correct": True,
                     "raw_response": str(response_path.relative_to(self.transcripts.parent))})
-                if not will_correct:
-                    raise ModelResponseError(error)
                 corrections += 1
                 # Keep the exact failed text only in the transcript. Extra values are never
                 # fed back; the unchanged task/evidence plus the precise error define the retry.
@@ -266,8 +303,19 @@ class AgentGateway:
                     messages[-1]["content"] = dumps(feedback)
                 else:
                     messages.append({"role": "user", "content": dumps(feedback)})
-                continue
+                return {"messages": messages, "corrections": corrections, "route": "request"}
             if not envelope["read_records"]:
-                return envelope["result"]
+                return {"result": envelope["result"], "route": "done"}
             messages.append({"role": "assistant", "content": dumps(envelope)})
             messages.append({"role": "user", "content": dumps({"requested_original_evidence": evidence})})
+            return {"messages": messages, "corrections": corrections, "route": "request"}
+
+        graph = StateGraph(dict)
+        graph.add_node("request", request)
+        graph.add_node("validate_or_read_evidence", self.progress.track(
+            f"factor.{role}.validate_response", check, heartbeat=False))
+        graph.add_edge(START, "request")
+        graph.add_edge("request", "validate_or_read_evidence")
+        graph.add_conditional_edges("validate_or_read_evidence",
+            lambda state: END if state["route"] == "done" else "request", [END, "request"])
+        return graph.compile().invoke({"messages": messages, "corrections": 0}, config=GRAPH_CONFIG)["result"]

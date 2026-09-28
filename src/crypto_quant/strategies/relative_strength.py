@@ -149,6 +149,7 @@ def run_relative_strength_backtest(
     config: Optional[BacktestConfig] = None,
     latency_bars: int = 0,
     max_participation: Optional[float] = None,
+    tradable: Optional[pd.Series] = None,
 ) -> BacktestResult:
     """Backtest one shared cash account with causal next-open fills.
 
@@ -166,6 +167,8 @@ def run_relative_strength_backtest(
     if symbols != sorted(SYMBOLS) or set(target_weights) != set(symbols):
         raise ValueError("market data and targets must contain BTCUSDT and ETHUSDT")
     common = _common_index(market_data)
+    if tradable is not None and (not tradable.index.equals(common) or tradable.dtype != bool or tradable.isna().any()):
+        raise ValueError("tradable must be a complete boolean series on the common grid")
     data = {symbol: market_data[symbol].loc[common] for symbol in symbols}
     targets = {
         symbol: target_weights[symbol]
@@ -222,6 +225,8 @@ def run_relative_strength_backtest(
 
         # Close/reduce before opening/increasing the other sleeve.
         for symbol in symbols:
+            if tradable is not None and not tradable.iloc[position]:
+                continue
             current_notional = units[symbol] * opens[symbol]
             desired_notional = desired[symbol] * marked_equity
             delta = desired_notional - current_notional
@@ -274,6 +279,8 @@ def run_relative_strength_backtest(
 
         # Open/increase target sleeves only after sells and fees have settled.
         for symbol in symbols:
+            if tradable is not None and not tradable.iloc[position]:
+                continue
             current_notional = units[symbol] * opens[symbol]
             desired_notional = desired[symbol] * marked_equity
             delta = desired_notional - current_notional

@@ -1,27 +1,29 @@
 {
-  "run_id": "btc-eth-engineering-replay",
+  "run_id": "basis-engineering",
   "purpose": "engineering",
-  "development_start": "2026-04-01T00:00:00Z",
-  "validation_start": "2026-05-01T00:00:00Z",
-  "validation_end": "2026-06-01T00:00:00Z",
+  "development_start": "2024-03-01T00:00:00Z",
+  "validation_start": "2024-04-01T00:00:00Z",
+  "validation_end": "2024-05-01T00:00:00Z",
   "prior_data_use": "工程演示区间，项目可能已在历史研究中使用；不宣称首次独立样本验证。",
   "parameter_space": {
-    "lookback": [
-      24,
-      72
+    "symbol": "BTCUSDT",
+    "margin_guard_ratio": 0.1,
+    "entry_basis": [
+      0.001,
+      0.002
     ],
-    "spread_threshold": [
-      0.01
+    "exit_basis": [
+      0.0005
     ],
-    "min_winner_return": [
-      0.0
+    "capital_fraction": [
+      0.25
     ]
   },
   "costs": {
     "initial_capital": 10000.0,
     "fee_bps": 10.0,
     "slippage_bps": 5.0,
-    "min_trade_fraction": 0.001,
+    "min_trade_fraction": 0,
     "stress_multiplier": 2.0
   },
   "gates": {
@@ -34,8 +36,8 @@
   "context_bytes": 200000,
   "task": {
     "research_type": "strategy_backtest",
-    "strategy_family": "btc_eth_spot_relative_strength",
-    "question": "BTC/ETH现货小时强弱轮动，在扣除交易成本后是否优于同成本50/50组合？",
+    "strategy_family": "spot_perp_basis",
+    "question": "核对现货与永续等量双腿及资金费账本",
     "deliverable": "strategy_candidate"
   },
   "imputed_hours": []

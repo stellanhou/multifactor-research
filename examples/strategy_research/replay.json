@@ -12,7 +12,54 @@
         "lookback": 24,
         "spread_threshold": 0.01,
         "min_winner_return": 0.0
+      },
+      "calculation_meaning": {
+        "inputs": "BTCUSDT and ETHUSDT spot 1h OHLC and quote_volume; complete common hourly grid; bar t is available at t+1h-1ms; no missing-bar filling",
+        "signal": "close[t] / close[t-24h] - 1 for each asset; BTC return minus ETH return; abs(spread) >= 0.01 and winner_return > 0.0; ties stay in cash",
+        "execution": "closed-hour target executes at next hour open; sell before buy; each segment starts from fresh cash; one pre-start signal bar; final close valuation without forced liquidation",
+        "position": "target 100% long the stronger asset or cash; no short or leverage; hourly target recomputation; actual buys constrained by available cash including fees; no separate stop loss",
+        "costs": "initial_capital=10000.0; fee_bps=10.0; slippage_bps=5.0; min_trade_fraction=0.001; stress multiplies both fees and slippage by 2.0; benchmark uses 50/50 hourly targets with the same base costs and no-trade band",
+        "parameters": "lookback=24 hours; spread_threshold=0.01 return fraction; min_winner_return=0.0 return fraction; only these three signal parameters are variable"
       }
+    }
+  },
+  {
+    "role": "calculate",
+    "response": {
+      "version": "v0001",
+      "plan_sha256": "17e93aec7e3f00fb413813a0ead6617daa07e26903c6f92f0fc8c65e26ea7fe1",
+      "consistent": true,
+      "checks": {
+        "inputs": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "signal": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "execution": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "position": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "costs": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "parameters": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        }
+      },
+      "hypothesis_matches": true,
+      "hypothesis_reason": "固定回放核对轮动假说；第二版本仅改变窗口。",
+      "evidence_refs": [
+        "v0001-definition"
+      ]
     }
   },
   {
@@ -69,7 +116,54 @@
         "lookback": 72,
         "spread_threshold": 0.01,
         "min_winner_return": 0.0
+      },
+      "calculation_meaning": {
+        "inputs": "BTCUSDT and ETHUSDT spot 1h OHLC and quote_volume; complete common hourly grid; bar t is available at t+1h-1ms; no missing-bar filling",
+        "signal": "close[t] / close[t-72h] - 1 for each asset; BTC return minus ETH return; abs(spread) >= 0.01 and winner_return > 0.0; ties stay in cash",
+        "execution": "closed-hour target executes at next hour open; sell before buy; each segment starts from fresh cash; one pre-start signal bar; final close valuation without forced liquidation",
+        "position": "target 100% long the stronger asset or cash; no short or leverage; hourly target recomputation; actual buys constrained by available cash including fees; no separate stop loss",
+        "costs": "initial_capital=10000.0; fee_bps=10.0; slippage_bps=5.0; min_trade_fraction=0.001; stress multiplies both fees and slippage by 2.0; benchmark uses 50/50 hourly targets with the same base costs and no-trade band",
+        "parameters": "lookback=72 hours; spread_threshold=0.01 return fraction; min_winner_return=0.0 return fraction; only these three signal parameters are variable"
       }
+    }
+  },
+  {
+    "role": "calculate",
+    "response": {
+      "version": "v0002",
+      "plan_sha256": "b3f6e5292ae6699e30ad907bb0dcbdc546c149921fcd534e66f0bf0e1e3e6f9f",
+      "consistent": true,
+      "checks": {
+        "inputs": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "signal": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "execution": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "position": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "costs": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        },
+        "parameters": {
+          "matches": true,
+          "reason": "固定工程回放：定义与程序步骤一致。"
+        }
+      },
+      "hypothesis_matches": true,
+      "hypothesis_reason": "固定回放核对轮动假说；第二版本仅改变窗口。",
+      "evidence_refs": [
+        "v0002-definition"
+      ]
     }
   },
   {

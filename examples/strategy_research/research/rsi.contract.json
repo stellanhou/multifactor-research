@@ -1,0 +1,33 @@
+{
+  "run_id": "rsi-AB-development",
+  "purpose": "research",
+  "development_start": "2022-08-01T00:00:00Z",
+  "validation_start": "2025-08-01T00:00:00Z",
+  "validation_end": "2026-08-01T00:00:00Z",
+  "prior_data_use": "A+B用于策略开发，B已可参与因子筛选；原C已有2026年4—7月开发/验证暴露，只作策略内部验证。最终测试为冻结后模拟账户前向验证。",
+  "parameter_space": {
+    "warmup_hours": 168
+  },
+  "costs": {
+    "initial_capital": 10000.0,
+    "fee_bps": 10.0,
+    "slippage_bps": 5.0,
+    "min_trade_fraction": 0.001,
+    "stress_multiplier": 2.0
+  },
+  "gates": {
+    "min_net_return": 0.0,
+    "min_excess_return": 0.0,
+    "max_drawdown": 0.15,
+    "min_traded_bars": 1,
+    "min_stress_return": 0.0
+  },
+  "context_bytes": 200000,
+  "task": {
+    "research_type": "strategy_backtest",
+    "strategy_family": "factor_rule_spot",
+    "question": "核对RSI回升交易闭环",
+    "deliverable": "strategy_candidate"
+  },
+  "imputed_hours": []
+}

@@ -1,11 +1,10 @@
-"""Restricted, unit-checked factor expressions implementing Plan section 13."""
+"""Restricted, causal factor expressions without formula-unit inference."""
 
 from __future__ import annotations
 
 import ast
 import math
 from dataclasses import dataclass
-from fractions import Fraction
 from typing import Any
 
 import numpy as np
@@ -23,21 +22,22 @@ class Operator:
 
 
 OPERATORS = {
-    "add": Operator("add(x,y)", "相容单位相加", 2, "pointwise"),
-    "sub": Operator("sub(x,y)", "相容单位相减", 2, "pointwise"),
-    "mul": Operator("mul(x,y)", "相乘，单位相乘", 2, "pointwise"),
+    "add": Operator("add(x,y)", "逐点相加", 2, "pointwise"),
+    "sub": Operator("sub(x,y)", "逐点相减", 2, "pointwise"),
+    "mul": Operator("mul(x,y)", "逐点相乘", 2, "pointwise"),
     "div": Operator("div(x,y)", "相除，零分母为空", 2, "pointwise"),
     "abs": Operator("abs(x)", "绝对值", 1, "pointwise"),
     "neg": Operator("neg(x)", "取负", 1, "pointwise"),
     "sign": Operator("sign(x)", "符号：-1、0、1", 1, "pointwise"),
-    "min": Operator("min(x,y)", "相容单位逐点较小值", 2, "pointwise"),
-    "max": Operator("max(x,y)", "相容单位逐点较大值", 2, "pointwise"),
-    "log": Operator("log(x)", "自然对数，非正数为空；优先使用无量纲输入", 1, "pointwise"),
+    "min": Operator("min(x,y)", "逐点较小值", 2, "pointwise"),
+    "max": Operator("max(x,y)", "逐点较大值", 2, "pointwise"),
+    "log": Operator("log(x)", "自然对数，非正数为空", 1, "pointwise"),
     "sqrt": Operator("sqrt(x)", "平方根，负数为空", 1, "pointwise"),
     "power": Operator("power(x,p)", "幂；指数为数字常量，非有限实数结果为空", 2, "pointwise"),
     "ts_delay": Operator("ts_delay(x,n)", "准确n小时前的值", 2, "timeseries"),
     "ts_delta": Operator("ts_delta(x,n)", "当前减n小时前", 2, "timeseries"),
     "ts_return": Operator("ts_return(x,n)", "当前/n小时前-1，零分母为空", 2, "timeseries"),
+    "ts_rsi": Operator("ts_rsi(x,n)", "Wilder RSI：n个连续变化均值初始化，之后1/n递推；涨跌均为0时50，仅无跌时100，仅无涨时0；缺失后重新初始化；依赖本面板初始化后的全部过去值", 2, "timeseries"),
     "ts_mean": Operator("ts_mean(x,n)", "完整n小时窗口均值，含当前已结束小时", 2, "timeseries"),
     "ts_sum": Operator("ts_sum(x,n)", "完整n小时窗口之和；小时重复费率之和不代表结算支付", 2, "timeseries"),
     "ts_min": Operator("ts_min(x,n)", "完整n小时窗口最小值", 2, "timeseries"),
@@ -78,36 +78,17 @@ def operator_catalog() -> list[dict[str, Any]]:
 
 
 @dataclass(frozen=True)
-class Unit:
-    powers: tuple[Fraction, ...] = (Fraction(0),) * 4
-
-    def multiply(self, other: Unit) -> Unit:
-        return Unit(tuple(a + b for a, b in zip(self.powers, other.powers)))
-
-    def power(self, value: Fraction) -> Unit:
-        return Unit(tuple(x * value for x in self.powers))
-
-    def label(self) -> str:
-        return " * ".join(
-            name if power == 1 else f"{name}^{power}"
-            for name, power in zip(("USDT", "base_asset", "hour", "count"), self.powers)
-            if power
-        ) or "dimensionless"
-
-
-@dataclass(frozen=True)
 class CompiledExpression:
     expression: str
     expanded_expression: str
     fields: tuple[str, ...]
-    unit: Unit
     lookback_hours: int
     tree: ast.AST
 
     def description(self) -> dict[str, Any]:
         return {
             "expression": self.expression, "expanded_expression": self.expanded_expression,
-            "fields": list(self.fields), "unit": self.unit.label(),
+            "fields": list(self.fields),
             "lookback_hours": self.lookback_hours,
         }
 
@@ -126,18 +107,19 @@ class CompiledExpression:
                 arguments = [visit(arg) for arg in node.args]
                 operator = OPERATORS[node.func.id]
                 detail = {"operator": node.func.id, "arguments": arguments,
-                          "meaning": operator.meaning, "scope": operator.scope,
-                          "unit": compile_expression(expression).unit.label()}
+                          "meaning": operator.meaning, "scope": operator.scope}
                 if operator.scope == "timeseries":
                     detail["window_hours"] = node.args[-1].value
                     detail["current_period"] = (
                         "only the value exactly n hours ago" if node.func.id == "ts_delay"
                         else "includes the current completed hour of each input expression"
                     )
+                    if node.func.id == "ts_rsi":
+                        detail["history"] = "recursive since panel initialization; window_hours is minimum seed history, not a finite dependency bound"
                 if operator.scope == "cross_section":
                     detail["membership"] = "eligible assets with valid input at this historical hour"
             else:
-                detail = {"constant": _number(node), "unit": "dimensionless"}
+                detail = {"constant": _number(node)}
             step_id = len(steps) + 1
             steps.append({"step": step_id, "expression": expression, **detail})
             return step_id
@@ -166,10 +148,10 @@ def compile_expression(expression: str) -> CompiledExpression:
         raise ValueError(f"invalid expression syntax: {exc.msg}") from exc
     fields: set[str] = set()
 
-    def visit(node: ast.AST) -> tuple[ast.AST, Unit, int]:
+    def visit(node: ast.AST) -> tuple[ast.AST, int]:
         if isinstance(node, (ast.Constant, ast.UnaryOp)):
             _number(node)
-            return node, Unit(), 0
+            return node, 0
         if isinstance(node, ast.Name):
             if node.id in TEMPLATES:
                 return visit(ast.parse(TEMPLATES[node.id], mode="eval").body)
@@ -178,7 +160,7 @@ def compile_expression(expression: str) -> CompiledExpression:
             if node.id not in FIELD_BY_NAME:
                 raise ValueError(f"field/template is not allowed: {node.id}")
             fields.add(node.id)
-            return node, Unit(tuple(Fraction(x) for x in FIELD_BY_NAME[node.id].dimensions)), 0
+            return node, 0
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
             raise ValueError("only allowed fields, numeric literals and operator calls are accepted")
         name = node.func.id
@@ -194,32 +176,15 @@ def compile_expression(expression: str) -> CompiledExpression:
             if not isinstance(window, ast.Constant) or type(window.value) is not int or window.value <= 0:
                 raise ValueError("window must be an explicit positive integer number of hours")
         args = [visit(arg) for arg in node.args]
-        unit = args[0][1]
-        lookback = max(arg[2] for arg in args)
-        if name in {"add", "sub", "min", "max"} and unit != args[1][1]:
-            raise ValueError(f"incompatible units in {name}: {unit.label()} and {args[1][1].label()}")
-        if name in {"mul", "ts_cov"}:
-            unit = unit.multiply(args[1][1])
-        elif name == "div":
-            unit = unit.multiply(args[1][1].power(Fraction(-1)))
-        elif name == "sqrt":
-            unit = unit.power(Fraction(1, 2))
-        elif name == "power":
-            unit = unit.power(Fraction(str(_number(node.args[1]))))
-        elif name in {"sign", "log", "ts_return", "ts_rank", "ts_corr"}:
-            unit = Unit()
-        elif op.scope == "cross_section":
-            if unit.powers[1]:
-                raise ValueError("cross-sectional comparison requires compatible asset units; use notional, returns or a dimensionless ratio")
-            unit = Unit()
+        lookback = max(arg[1] for arg in args)
         if op.scope == "timeseries":
             n = node.args[-1].value
-            lookback += n if name in {"ts_delay", "ts_delta", "ts_return"} else n - 1
+            lookback += n if name in {"ts_delay", "ts_delta", "ts_return", "ts_rsi"} else n - 1
         node = ast.Call(func=node.func, args=[arg[0] for arg in args], keywords=[])
-        return node, unit, lookback
+        return node, lookback
 
-    expanded, unit, lookback = visit(tree)
-    return CompiledExpression(expression, ast.unparse(expanded), tuple(sorted(fields)), unit, lookback, expanded)
+    expanded, lookback = visit(tree)
+    return CompiledExpression(expression, ast.unparse(expanded), tuple(sorted(fields)), lookback, expanded)
 
 
 def template_catalog() -> list[dict[str, Any]]:
@@ -231,6 +196,37 @@ class ExpressionResult:
     values: pd.Series
     definition: dict[str, Any]
     cross_section_counts: pd.DataFrame
+
+
+def wilder_rsi(values: pd.DataFrame, periods: int) -> pd.DataFrame:
+    """Causal SMA seed followed by Wilder recursion; gaps reset the state."""
+    result = pd.DataFrame(np.nan, index=values.index, columns=values.columns)
+    for column in values:
+        previous = np.nan
+        count, gain, loss = 0, 0.0, 0.0
+        output = np.full(len(values), np.nan)
+        for i, value in enumerate(values[column].to_numpy(dtype=float)):
+            if not np.isfinite(value):
+                previous, count, gain, loss = np.nan, 0, 0.0, 0.0
+                continue
+            if np.isfinite(previous):
+                change = value - previous
+                up, down = max(change, 0.0), max(-change, 0.0)
+                if count < periods:
+                    gain += up
+                    loss += down
+                    count += 1
+                    if count == periods:
+                        gain /= periods
+                        loss /= periods
+                else:
+                    gain = (gain * (periods - 1) + up) / periods
+                    loss = (loss * (periods - 1) + down) / periods
+                if count == periods:
+                    output[i] = 50.0 if gain + loss == 0 else 100.0 * gain / (gain + loss)
+            previous = value
+        result[column] = output
+    return result
 
 
 def evaluate_expression(expression: str, panel: FactorInputPanel) -> ExpressionResult:
@@ -287,6 +283,7 @@ def evaluate_expression(expression: str, panel: FactorInputPanel) -> ExpressionR
                 if name == "ts_delay": output = x.shift(n)
                 elif name == "ts_delta": output = x - x.shift(n)
                 elif name == "ts_return": output = x / x.shift(n).where(x.shift(n) != 0) - 1
+                elif name == "ts_rsi": output = wilder_rsi(x, n)
                 elif name == "ts_mean": output = rolling.mean()
                 elif name == "ts_sum": output = rolling.sum()
                 elif name == "ts_min": output = rolling.min()

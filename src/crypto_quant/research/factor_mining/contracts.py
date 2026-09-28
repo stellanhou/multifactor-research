@@ -11,6 +11,8 @@ from typing import Any
 
 import pandas as pd
 
+from .structured_output import validate_schema as model_fields
+
 
 def dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
@@ -41,37 +43,21 @@ def number(value: Any, name: str) -> float:
     return float(value)
 
 
-def model_fields(value: Any, schema: dict[str, Any], extras: list[str], pointer: str = "") -> Any:
-    """Project model JSON onto declared fields, retaining types and missing-field errors.
+def _object_schema(properties: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "object", "properties": properties, "required": list(properties), "additionalProperties": False}
 
-    Supports the objects, arrays, scalar types and nullable schemas used by this
-    workflow. Business constraints are checked by the existing callers.
-    """
-    if "anyOf" in schema:  # All unions in this workflow are nullable fields.
-        if value is None:
-            return None
-        schema = next(option for option in schema["anyOf"] if option.get("type") != "null")
-    kind = schema.get("type")
-    where = pointer or "/"
-    if kind == "object":
-        require(isinstance(value, dict), f"{where} must be an object")
-        properties = schema["properties"]
-        extras.extend(pointer + "/" + key.replace("~", "~0").replace("/", "~1")
-                      for key in sorted(set(value) - set(properties)))
-        missing = sorted(set(schema["required"]) - set(value))
-        require(not missing, f"{where} missing required fields: {', '.join(missing)}")
-        return {key: model_fields(value[key], field, extras,
-                    pointer + "/" + key.replace("~", "~0").replace("/", "~1"))
-                for key, field in properties.items() if key in value}
-    if kind == "array":
-        require(isinstance(value, list), f"{where} must be an array")
-        return [model_fields(item, schema["items"], extras, f"{pointer}/{index}")
-                for index, item in enumerate(value)]
-    if kind is not None:
-        valid = {"string": isinstance(value, str), "boolean": type(value) is bool,
-                 "integer": type(value) is int, "number": type(value) in (int, float), "null": value is None}
-        require(valid[kind], f"{where} must be {kind}")
-    return value
+
+def _text_schema(description: str) -> dict[str, Any]:
+    return {"type": "string", "minLength": 1, "description": description}
+
+
+def _array_schema(items: dict[str, Any], **limits: int) -> dict[str, Any]:
+    return {"type": "array", "items": items, **limits}
+
+
+def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
+    return {"anyOf": [schema, {"type": "null"}]}
+
 
 
 def utc_hour(value: str) -> pd.Timestamp:
@@ -111,6 +97,8 @@ class ResearchSpec:
     max_lookback_hours: int
     context_tokens: int
     output_tokens: int | None
+    admission_scheme: str = "baseline"
+    plan3_tracks_gate: bool = True
 
     def __post_init__(self) -> None:
         identifier(self.run_id)
@@ -133,6 +121,11 @@ class ResearchSpec:
         for name in ("confidence", "fdr_alpha"):
             require(0 < number(getattr(self, name), name) < 1, f"{name} must lie in (0,1)")
         require(self.fdr_method in {"BH", "BY"}, "fdr_method must be BH or BY")
+        require(self.admission_scheme in {"baseline", "plan3"}, "unknown admission scheme")
+        require(type(self.plan3_tracks_gate) is bool, "plan3_tracks_gate must be boolean")
+        if not self.plan3_tracks_gate:
+            require(self.admission_scheme == "plan3" and self.fdr_method == "BH",
+                    "Plan 3 tags require BH Rank IC correction")
         require(0 <= number(self.min_abs_ic, "min_abs_ic") <= 1, "invalid IC threshold")
         require(number(self.min_directional_spread, "min_directional_spread") >= 0, "spread threshold must be nonnegative")
         require(0 <= number(self.min_stage_share, "min_stage_share") <= 1, "invalid stage share")
@@ -145,10 +138,15 @@ class ResearchSpec:
         return cls(**value)
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        if self.admission_scheme == "baseline":
+            value.pop("admission_scheme")
+        if self.plan3_tracks_gate:
+            value.pop("plan3_tracks_gate")
+        return value
 
     def bounds(self, stage: str) -> tuple[pd.Timestamp, pd.Timestamp]:
-        require(stage in {"A", "B"}, "C is reserved for final strategy testing")
+        require(stage in {"A", "B"}, "C is reserved for strategy internal validation; factor mining cannot read C")
         return (utc_hour(self.a_start), utc_hour(self.b_start)) if stage == "A" else (utc_hour(self.b_start), utc_hour(self.c_start))
 
 
@@ -158,7 +156,7 @@ def candidate(value: Any) -> dict[str, Any]:
             "candidate fields do not match the declared schema")
     for name in ("name", "expression", "hypothesis", "change_reason"):
         text(value[name], name)
-    require(isinstance(value["meaning"], str), "meaning must be text; an empty definition returns to ideation")
+    require(isinstance(value["meaning"], str), "meaning must be text")
     require(type(value["direction"]) is int and value["direction"] in {-1, 1}, "declare fixed direction -1 or 1")
     for name in ("parent_id", "proposal_id"):
         if value[name] is not None:

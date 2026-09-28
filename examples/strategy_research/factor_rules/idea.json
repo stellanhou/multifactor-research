@@ -1,0 +1,37 @@
+{
+  "id": "factor-rule-engineering",
+  "source_type": "manual",
+  "source": {
+    "author": "engineering fixture",
+    "date": "2026-09-19"
+  },
+  "original_claim": "组合多个价量信号，自主定义入场、退出、仓位与调仓周期，检验成本后表现。",
+  "economic_mechanism": "待检验的动量延续和成交活跃度假说。",
+  "market_and_horizon": {
+    "market": "spot",
+    "symbols": [
+      "BTCUSDT",
+      "ETHUSDT"
+    ],
+    "interval": "1h"
+  },
+  "data_and_coverage": {
+    "fields": [
+      "open",
+      "high",
+      "low",
+      "close",
+      "quote_volume"
+    ],
+    "coverage": "程序读取本地数据库后核验"
+  },
+  "falsification_conditions": [
+    "成本后收益和相对基准表现不支持假说"
+  ],
+  "unverified_assumptions": [
+    "工程示例，不代表有效因子或策略准入。"
+  ],
+  "next_research_plan": [
+    "根据程序结果评估组合评分和交易规则。"
+  ]
+}
