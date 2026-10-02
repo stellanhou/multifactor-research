@@ -9,18 +9,9 @@ market_data/
 *.sqlite-shm
 *.sqlite-wal
 
-# Generated research and runtime artifacts.
-experiments/audits/
-experiments/briefs/
-experiments/data_requests/
-experiments/demo_sessions/
-experiments/download_logs/
-experiments/futures_backfill/
-experiments/futures_demo_sessions/
-experiments/runs/
-experiments/shadow_sessions/
-experiments/testnet_sessions/
-experiments/web_console/
+# Local research evidence and runtime artifacts. Reproducible inputs live in examples/.
+/experiments/
+/scratch/
 
 # Python and local tool caches.
 __pycache__/
