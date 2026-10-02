@@ -39,3 +39,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "crypto_quant.web_console" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

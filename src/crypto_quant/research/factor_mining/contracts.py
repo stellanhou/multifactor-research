@@ -22,6 +22,16 @@ def digest(value: Any) -> str:
     return hashlib.sha256(dumps(value).encode()).hexdigest()
 
 
+def without_hash_metadata(value: Any) -> Any:
+    """Compare saved evidence without treating historical hash fields as gates."""
+    if isinstance(value, dict):
+        return {key: without_hash_metadata(item) for key, item in value.items()
+                if key != "sha256" and not key.endswith("_sha256")}
+    if isinstance(value, list):
+        return [without_hash_metadata(item) for item in value]
+    return value
+
+
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise ValueError(message)
@@ -97,8 +107,9 @@ class ResearchSpec:
     max_lookback_hours: int
     context_tokens: int
     output_tokens: int | None
-    admission_scheme: str = "baseline"
-    plan3_tracks_gate: bool = True
+    b_horizons: tuple[int, ...]
+    admission_scheme: str = "plan3"
+    plan3_tracks_gate: bool = False
 
     def __post_init__(self) -> None:
         identifier(self.run_id)
@@ -120,12 +131,14 @@ class ResearchSpec:
         require(self.min_periods > self.hac_lags + 1 and self.rolling_periods >= 2, "insufficient statistical window")
         for name in ("confidence", "fdr_alpha"):
             require(0 < number(getattr(self, name), name) < 1, f"{name} must lie in (0,1)")
-        require(self.fdr_method in {"BH", "BY"}, "fdr_method must be BH or BY")
-        require(self.admission_scheme in {"baseline", "plan3"}, "unknown admission scheme")
-        require(type(self.plan3_tracks_gate) is bool, "plan3_tracks_gate must be boolean")
-        if not self.plan3_tracks_gate:
-            require(self.admission_scheme == "plan3" and self.fdr_method == "BH",
-                    "Plan 3 tags require BH Rank IC correction")
+        require(self.fdr_method == "BH", "FM-v6 requires BH Rank IC correction")
+        require(self.admission_scheme == "plan3", "FM-v6 requires admission_scheme=plan3")
+        require(self.plan3_tracks_gate is False, "FM-v6 requires plan3_tracks_gate=false")
+        require(isinstance(self.b_horizons, (list, tuple))
+                and all(type(horizon) is int for horizon in self.b_horizons)
+                and tuple(self.b_horizons) == (1, 4, 24),
+                "FM-v6 b_horizons must be exactly [1, 4, 24]")
+        object.__setattr__(self, "b_horizons", tuple(self.b_horizons))
         require(0 <= number(self.min_abs_ic, "min_abs_ic") <= 1, "invalid IC threshold")
         require(number(self.min_directional_spread, "min_directional_spread") >= 0, "spread threshold must be nonnegative")
         require(0 <= number(self.min_stage_share, "min_stage_share") <= 1, "invalid stage share")
@@ -135,14 +148,15 @@ class ResearchSpec:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> ResearchSpec:
-        return cls(**value)
+        require(isinstance(value, dict), "research contract must be an object")
+        require({"fdr_method", "admission_scheme", "plan3_tracks_gate", "b_horizons"} <= value.keys(),
+                "FM-v6 contract must explicitly declare fdr_method, admission_scheme, plan3_tracks_gate and b_horizons")
+        require(isinstance(value["b_horizons"], list), "FM-v6 b_horizons must be a list")
+        return cls(**{**value, "b_horizons": tuple(value["b_horizons"])})
 
     def as_dict(self) -> dict[str, Any]:
         value = asdict(self)
-        if self.admission_scheme == "baseline":
-            value.pop("admission_scheme")
-        if self.plan3_tracks_gate:
-            value.pop("plan3_tracks_gate")
+        value["b_horizons"] = list(self.b_horizons)
         return value
 
     def bounds(self, stage: str) -> tuple[pd.Timestamp, pd.Timestamp]:

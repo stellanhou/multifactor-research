@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
+import subprocess
 import tempfile
 from importlib.metadata import version
+from pathlib import Path
 
 from openai_codex import CodexConfig
 from openai_codex.async_client import AsyncCodexClient
-from openai_codex.errors import CodexError
+from openai_codex.errors import CodexError, InternalRpcError
 from openai_codex.generated.v2_all import ConfigReadResponse, TurnStatus
 
 from .contracts import require, text
@@ -20,7 +24,7 @@ DEFAULT_MODEL = "gpt-5.6-luna"
 PROVIDER = "codex-sdk-chatgpt"
 
 
-def _config(directory):
+def _config(directory, codex_bin=None):
     # These are process-local overrides: the user's Codex settings and login stay intact.
     # Research evidence is supplied explicitly. Codex may retain its global AGENTS.md;
     # project documents, personal memories and research-external tools are disabled.
@@ -36,8 +40,32 @@ def _config(directory):
         'features.skip_host_skill_discovery=true', 'developer_instructions=""',
         *(f"features.{name}=false" for name in disabled),
     )
-    return CodexConfig(cwd=directory, config_overrides=overrides,
-                       env={"OPENAI_API_KEY": "", "CODEX_API_KEY": ""})
+    options = {"cwd": directory, "config_overrides": overrides,
+               "env": {"OPENAI_API_KEY": "", "CODEX_API_KEY": ""}}
+    if codex_bin is not None:
+        options["codex_bin"] = codex_bin
+    return CodexConfig(**options)
+
+
+def _codex_binary(path):
+    require(isinstance(path, (str, os.PathLike)), "codex_bin must be a filesystem path")
+    raw_path = os.fspath(path)
+    require(isinstance(raw_path, str) and bool(raw_path.strip()), "codex_bin must be a nonempty path")
+    try:
+        binary = Path(raw_path).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"codex_bin does not identify an existing file: {raw_path}") from exc
+    require(binary.is_file() and os.access(binary, os.X_OK),
+            "codex_bin must identify an executable file")
+    try:
+        result = subprocess.run([str(binary), "--version"], check=True, capture_output=True,
+                                text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(f"could not read version from codex_bin: {binary}") from exc
+    output = f"{result.stdout}\n{result.stderr}"
+    match = re.search(r"(?<![\w.])(?:v)?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)(?![\w.])", output)
+    require(match is not None, f"codex_bin --version returned no parseable version: {binary}")
+    return str(binary), match.group(1)
 
 
 async def _subscription(codex):
@@ -58,23 +86,30 @@ async def _thread_config(codex):
 
 
 class CodexModel:
-    def __init__(self, model=DEFAULT_MODEL, *, reasoning_effort="max", timeout_seconds=300):
+    def __init__(self, model=DEFAULT_MODEL, *, reasoning_effort="max", timeout_seconds=300,
+                 codex_bin=None):
         self.model = text(model, "model")
         require(reasoning_effort in {"low", "medium", "high", "xhigh", "max"}, "unsupported reasoning effort")
         require(type(timeout_seconds) is int and timeout_seconds > 0, "timeout must be positive")
         self.reasoning_effort, self.timeout_seconds = reasoning_effort, timeout_seconds
+        self.codex_bin, self.codex_runtime_version = (
+            _codex_binary(codex_bin) if codex_bin is not None else (None, None))
 
     def settings(self):
-        return {"provider": PROVIDER, "model": self.model, "reasoning_effort": self.reasoning_effort,
-                "timeout_seconds": self.timeout_seconds, "sdk_version": version("openai-codex"),
-                "runtime_version": version("openai-codex-cli-bin")}
+        settings = {"provider": PROVIDER, "model": self.model, "reasoning_effort": self.reasoning_effort,
+                    "timeout_seconds": self.timeout_seconds, "sdk_version": version("openai-codex"),
+                    "runtime_version": (self.codex_runtime_version if self.codex_bin is not None
+                                        else version("openai-codex-cli-bin"))}
+        if self.codex_bin is not None:
+            settings["codex_bin"] = self.codex_bin
+        return settings
 
     def available_models(self):
         return asyncio.run(self._models())
 
     async def _models(self):
         with tempfile.TemporaryDirectory(prefix="quant-codex-") as directory:
-            codex = AsyncCodexClient(_config(directory))
+            codex = AsyncCodexClient(_config(directory, self.codex_bin))
             try:
                 async with asyncio.timeout(self.timeout_seconds):
                     await _subscription(codex)
@@ -94,9 +129,10 @@ class CodexModel:
         return asyncio.run(self._complete(messages, session_id))
 
     async def _complete(self, messages, session_id):
-        trace = {"session_id": session_id, "settings": self.settings(), "events": []}
+        trace = {"session_id": session_id, "settings": self.settings(), "events": [],
+                 "generation_started": False}
         with tempfile.TemporaryDirectory(prefix="quant-codex-") as directory:
-            codex = AsyncCodexClient(_config(directory))
+            codex = AsyncCodexClient(_config(directory, self.codex_bin))
             try:
                 async with asyncio.timeout(self.timeout_seconds):
                     await _subscription(codex)
@@ -122,6 +158,7 @@ class CodexModel:
                     require(started.model == self.model and started.model_provider == "openai",
                             "Codex started with an unexpected model/provider")
                     trace["thread_id"] = started.thread.id
+                    trace["generation_started"] = True
                     turn = await codex.turn_start(started.thread.id, prompt, {"effort": self.reasoning_effort})
                     trace["turn_id"] = turn.turn.id
                     answer, usage, completed = None, None, None
@@ -147,11 +184,14 @@ class CodexModel:
                     require(bool(answer and answer.strip()), "Codex completed without a final answer")
                     return ModelReply(answer, usage, self.model, "stop", self.reasoning_effort, trace)
             except (TimeoutError, CodexError, ValueError) as exc:
-                # No provider/model fallback or hidden outer retry. Closing the owned server
-                # cancels its active generation, including on Ctrl+C and validation failures.
+                # The gateway owns bounded retries. Preparation timeouts are safe to repeat;
+                # once turn/start is attempted, generation may already have begun remotely.
                 trace["error_type"] = type(exc).__name__
                 trace["error"] = str(exc)
+                retryable = not trace["generation_started"] and (
+                    isinstance(exc, TimeoutError) or isinstance(exc, InternalRpcError)
+                    and exc.message == "workspace routing discovery timed out")
                 raise ApiCallError(f"Codex SDK call failed: {type(exc).__name__}: {exc}",
-                                   retryable=False, diagnostics=trace) from exc
+                                   retryable=retryable, diagnostics=trace) from exc
             finally:
                 await codex.close()

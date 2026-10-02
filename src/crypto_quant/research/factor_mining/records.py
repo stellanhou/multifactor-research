@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .contracts import ResearchSpec, digest, dumps, identifier, model_fields, require
+from .factor_archive import EvaluationKey, FactorArchive, FactorIdentity
 from .model import ApiCallError, JsonModel, ModelReply
 from crypto_quant.research.progress import ProgressLog
 
@@ -48,14 +49,75 @@ def write_json(path: Path, value: Any) -> None:
 
 
 class RecordStore:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, run_root: Path | None = None,
+                 archive_root: Path | None = None):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        self.run_root = Path(run_root).resolve() if run_root is not None else self.root.parent.resolve()
+        self.archive_root = Path(archive_root).resolve() if archive_root is not None else self._marked_archive_root(self.run_root)
+
+    @staticmethod
+    def _marked_archive_root(run_root: Path) -> Path | None:
+        marker = run_root / "factor_archive.json"
+        if not marker.is_file():
+            return None
+        try:
+            value = json.loads(marker.read_text(encoding="utf-8"))
+            require(isinstance(value, dict), "factor archive marker is invalid")
+            require(value.get("format") == "one-factor-one-file-v2", "factor archive format is unsupported")
+            relative = Path(value["archive_root"])
+            require(not relative.is_absolute(), "factor archive root must be relative to its run")
+            return (run_root / relative).resolve()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise EvidenceIntegrityError("factor archive marker is invalid") from exc
+
+    @staticmethod
+    def _expected_archive_root(run_root: Path) -> Path:
+        return run_root.resolve().parent / "factor_archive_v2"
+
+    @staticmethod
+    def _source_run_root(path: Path, fallback: Path) -> Path:
+        resolved = path.resolve()
+        if resolved.parent.name in {"a_records", "b_records"}:
+            return resolved.parent.parent
+        return fallback.resolve()
+
+    @classmethod
+    def _archive_context(cls, path: Path, fallback_run_root: Path,
+                         fallback_archive_root: Path | None) -> tuple[Path, Path | None]:
+        run_root = cls._source_run_root(path, fallback_run_root)
+        archive_root = cls._marked_archive_root(run_root)
+        if archive_root is None and run_root == fallback_run_root.resolve():
+            archive_root = fallback_archive_root
+        return run_root, archive_root
+
+    @staticmethod
+    def _open_archived_evaluation(locator: dict[str, Any], run_root: Path,
+                                  archive_root: Path | None) -> tuple[FactorArchive, EvaluationKey, dict[str, Any]]:
+        try:
+            require(isinstance(locator, dict), "factor archive locator is invalid")
+            relative_root = Path(locator["root"])
+            require(not relative_root.is_absolute(), "factor archive locator root must be relative")
+            resolved_root = (run_root / relative_root).resolve()
+            require(archive_root is not None and resolved_root == archive_root,
+                    "factor archive locator differs from the run marker")
+            identity = FactorIdentity(**locator["identity"])
+            key = EvaluationKey(**locator["evaluation_key"])
+        except (KeyError, TypeError) as exc:
+            raise EvidenceIntegrityError("factor archive locator is invalid") from exc
+        archive = FactorArchive.open_existing(resolved_root, identity)
+        evaluation = archive.get_evaluation(key)
+        require(evaluation["evaluation_id"] == str(locator["evaluation_id"]),
+                "factor archive evaluation ID differs from its run pointer")
+        require(evaluation["value_set_id"] == locator.get("value_set_id"),
+                "factor archive value-set ID differs from its run pointer")
+        return archive, key, evaluation
 
     def append(self, record_id: str, kind: str, data: Any) -> str:
         record_id = identifier(record_id)
         write_json(self.root / f"{record_id}.json", {"id": record_id, "kind": kind, "data": data,
-                    "sha256": digest(data), "created_at": datetime.now(timezone.utc).isoformat()})
+                    "sha256": digest(data),
+                    "created_at": datetime.now(timezone.utc).isoformat()})
         return record_id
 
     def all(self) -> list[dict[str, Any]]:
@@ -65,22 +127,115 @@ class RecordStore:
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
             require(isinstance(record, dict) and "data" in record, "research record is invalid")
-        except ValueError as exc:
+            if record.get("kind") == "evaluation":
+                data = record["data"]
+                require(isinstance(data, dict), "evaluation record data is invalid")
+                source_run_root, archive_root = self._archive_context(
+                    path, self.run_root, self.archive_root)
+                if "factor_archive" in data:
+                    _, _, evaluation = self._open_archived_evaluation(
+                        data["factor_archive"], source_run_root, archive_root)
+                    require(isinstance(evaluation["payload"], dict), "factor archive evaluation payload is invalid")
+                    data.update(evaluation["payload"])
+                horizon_reports = data.get("horizons")
+                if horizon_reports is not None:
+                    require(isinstance(horizon_reports, dict) and bool(horizon_reports),
+                            "evaluation horizons are invalid")
+                    retained_horizons = data["retained_horizons"]
+                    require(data["segment"] == "B" and type(data["direction"]) is int
+                            and data["direction"] in {-1, 1}
+                            and isinstance(retained_horizons, list) and bool(retained_horizons)
+                            and all(type(horizon) is int for horizon in retained_horizons)
+                            and len(retained_horizons) == len(set(retained_horizons))
+                            and set(horizon_reports) == {str(horizon) for horizon in retained_horizons},
+                            "B evaluation horizons differ from the frozen range")
+                    for horizon, report in horizon_reports.items():
+                        require(isinstance(report, dict) and "factor_archive" in report,
+                                "horizon evaluation locator is missing")
+                        _, key, evaluation = self._open_archived_evaluation(
+                            report["factor_archive"], source_run_root, archive_root)
+                        require(isinstance(evaluation["payload"], dict),
+                                "factor archive horizon payload is invalid")
+                        payload = evaluation["payload"]
+                        require(key.segment == data["segment"] == "B"
+                                and key.horizon == f"{horizon}h"
+                                and payload.get("segment") == data["segment"]
+                                and payload.get("direction") == data["direction"]
+                                and payload.get("horizon_hours") == int(horizon)
+                                and report["summary"] == payload["summary"]
+                                and report["coverage"] == payload["coverage"],
+                                "factor archive horizon differs from its compact B record")
+                        horizon_reports[horizon] = {**report, **payload}
+            source_run_root, archive_root = self._archive_context(path, self.run_root, self.archive_root)
+            if record.get("kind") == "frozen_definition_and_A_evidence":
+                reference = record["data"].get("a_evaluation_ref")
+                if isinstance(reference, dict) and "record_id" in reference and "data" not in reference:
+                    evaluation_path = source_run_root / "a_records" / f"{identifier(reference['record_id'])}.json"
+                    referenced = RecordStore(evaluation_path.parent, run_root=source_run_root,
+                                             archive_root=archive_root)._load(evaluation_path)
+                    require(referenced["id"] == reference["record_id"],
+                            "referenced A evaluation identifier differs")
+                    record["data"]["a_evaluation_ref"] = {**reference, "data": referenced["data"]}
+        except (KeyError, TypeError, ValueError) as exc:
             raise EvidenceIntegrityError("research record is invalid") from exc
         return record
 
     def read(self, record_id: str, pointer: str, offset: int, limit: int) -> Any:
-        record = self._load(self.root / f"{identifier(record_id)}.json")
-        require(isinstance(pointer, str) and (pointer == "" or pointer.startswith("/")), "use a JSON pointer into record data")
-        require(type(offset) is int and offset >= 0 and type(limit) is int and limit > 0, "invalid record page")
-        value = record["data"]
-        for part in pointer.split("/")[1:]:
-            part = part.replace("~1", "/").replace("~0", "~")
-            value = value[int(part)] if isinstance(value, list) else value[part]
-        if isinstance(value, list):
-            return {"total": len(value), "offset": offset, "items": value[offset:offset + limit]}
-        require(offset == 0, "offset applies only to arrays")
-        return value
+        path = self.root / f"{identifier(record_id)}.json"
+        require(isinstance(pointer, str) and (pointer == "" or pointer.startswith("/")),
+                "use a JSON pointer into record data")
+        require(type(offset) is int and offset >= 0 and type(limit) is int and limit > 0,
+                "invalid record page")
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            require(isinstance(raw, dict) and "data" in raw, "research record is invalid")
+        except ValueError as exc:
+            raise EvidenceIntegrityError("research record is invalid") from exc
+        if pointer.endswith("/factor_values") or pointer == "/factor_values":
+            base_pointer = pointer[:-len("/factor_values")]
+            try:
+                parent = read_pointer(raw["data"], base_pointer, 0, 1)
+            except (KeyError, IndexError, TypeError):
+                parent = read_pointer(self._load(path)["data"], base_pointer, 0, 1)
+            if isinstance(parent, dict) and isinstance(parent.get("factor_archive"), dict):
+                source_run_root, archive_root = self._archive_context(path, self.run_root, self.archive_root)
+                archive, key, _ = self._open_archived_evaluation(
+                    parent["factor_archive"], source_run_root, archive_root)
+                return archive.page_factor_values(key, offset=offset, limit=limit)
+            if isinstance(parent, dict) and isinstance(parent.get("a_evaluation_ref"), dict):
+                locator = parent["a_evaluation_ref"].get("factor_archive")
+                if isinstance(locator, dict):
+                    source_run_root, archive_root = self._archive_context(path, self.run_root, self.archive_root)
+                    archive, key, _ = self._open_archived_evaluation(locator, source_run_root, archive_root)
+                    return archive.page_factor_values(key, offset=offset, limit=limit)
+        record = self._load(path)
+        return read_pointer(record["data"], pointer, offset, limit)
+
+
+def read_pointer(value: Any, pointer: str, offset: int, limit: int) -> Any:
+    """Read an exact page from a saved record or a referenced record."""
+    require(isinstance(pointer, str) and (pointer == "" or pointer.startswith("/")), "use a JSON pointer into record data")
+    require(type(offset) is int and offset >= 0 and type(limit) is int and limit > 0, "invalid record page")
+    for part in pointer.split("/")[1:]:
+        part = part.replace("~1", "/").replace("~0", "~")
+        value = value[int(part)] if isinstance(value, list) else value[part]
+    if isinstance(value, list):
+        return {"total": len(value), "offset": offset, "items": value[offset:offset + limit]}
+    require(offset == 0, "offset applies only to arrays")
+    return value
+
+
+def record_reference(record: dict[str, Any]) -> dict[str, str]:
+    return {"record_id": identifier(record["id"])}
+
+
+def load_record_reference(root: Path, reference: dict[str, str]) -> dict[str, Any]:
+    require("record_id" in reference, "research record reference is invalid")
+    record_id = identifier(reference["record_id"])
+    store = RecordStore(Path(root))
+    record = store._load(store.root / f"{record_id}.json")
+    require(record["id"] == record_id, "referenced research record identifier differs")
+    return record
 
 
 def compact_record(record: dict[str, Any], *, page_cycle_candidates: bool = False) -> dict[str, Any]:
@@ -113,6 +268,14 @@ def compact_record(record: dict[str, Any], *, page_cycle_candidates: bool = Fals
 
     def compact(value: Any, pointer: str = "") -> Any:
         if isinstance(value, dict):
+            locator = value.get("factor_archive")
+            if isinstance(locator, dict) and locator.get("value_set_id") is not None and "factor_values" not in value:
+                factor_values_pointer = pointer + "/factor_values"
+                value = {**value, "factor_values": {
+                    "record_id": record["id"], "pointer": factor_values_pointer,
+                    "rows": locator.get("factor_value_count", 0),
+                    "read_records": "request an explicit offset and limit to read original rows",
+                }}
             if pointer.endswith("/coverage") and value and all(isinstance(v, dict) and "eligible_rows" in v for v in value.values()):
                 groups: dict[str, dict[str, Any]] = {}
                 for field, statistics in value.items():
@@ -126,7 +289,10 @@ def compact_record(record: dict[str, Any], *, page_cycle_candidates: bool = Fals
             if pointer.split("/")[-1] in {
                 "periods", "per_symbol", "factor_values", "cross_section_counts", "stages",
             }:
-                return {"record_id": record["id"], "pointer": pointer, "rows": len(value),
+                rows = len(value)
+                if pointer.split("/")[-1] == "factor_values":
+                    rows = data.get("factor_archive", {}).get("factor_value_count", rows)
+                return {"record_id": record["id"], "pointer": pointer, "rows": rows,
                         "read_records": "request an explicit offset and limit to read original rows"}
             # Goal research cycles contain immutable run records as a nested list.
             # Recurse with exact JSON-pointer indices so their numeric tables can
@@ -175,7 +341,12 @@ class AgentGateway:
         base = f"model-{call_id}-{suffix}"
         if not (self.store.root / f"{base}.json").exists():
             return base
-        return f"model-{call_id}-{digest(self.spec.run_id)[:12]}-{suffix}"
+        revision = 2
+        candidate = f"model-{call_id}-{revision}-{suffix}"
+        while (self.store.root / f"{candidate}.json").exists():
+            revision += 1
+            candidate = f"model-{call_id}-{revision}-{suffix}"
+        return candidate
 
     def _input_bound(self, messages: list[dict[str, str]]) -> int:
         # Conservative UTF-8 byte upper bound, not a claim to have a provider tokenizer.
@@ -223,7 +394,9 @@ class AgentGateway:
         require(self.stage == "A" or role == "evaluator", "B results cannot feed ideation or optimization")
         records = self.store.all()
         content = {"role": role, "task": task, "contract": self.spec.as_dict(),
-                   "payload": payload, "output_schema": schema, "records": records}
+                   "payload": payload, "output_schema": schema,
+                   "records": [record if record["kind"] == "goal_context" else compact_record(record)
+                               for record in records]}
         system = SYSTEM if self.stage == "A" else SYSTEM.replace(
             "探索只使用A，禁止请求B/C。", "当前仅解释冻结候选的B段验证及与A的对照，禁止修改候选或请求C。")
         messages = [{"role": "system", "content": system}, {"role": "user", "content": dumps(content)}]
@@ -232,12 +405,7 @@ class AgentGateway:
         budget = self.spec.context_tokens
         if self.spec.output_tokens is not None:
             budget -= self.spec.output_tokens
-        context_mode = "archived_cycles_paged" if any(
-            record.get("numeric_tables_paged") for record in records) else "full"
-        if self._input_bound(messages) > budget:
-            content["records"] = [compact_record(record) for record in records]
-            context_mode = "numeric_tables_paged"
-            messages[1]["content"] = dumps(content)
+        context_mode = "numeric_tables_paged"
         if self._input_bound(messages) > budget:
             content["records"] = [compact_record(record, page_cycle_candidates=True) for record in records]
             context_mode = "cycle_candidates_paged"

@@ -10,6 +10,8 @@
 
 输入位于 `market_data/` 和 `examples/` 的研究合同；`src/crypto_quant/` 负责处理；运行结果及证据保存在 `experiments/`。命令入口为 `src/crypto_quant/cli.py`，四个因子角色位于 `src/crypto_quant/research/factor_mining/`。文档索引见[项目文档](docs/README.md)，检查代码位于 `tests/`，辅助脚本位于 `scripts/`。
 
+Git 保存源码、测试、合同示例和文档；`market_data/`、`experiments/`、`scratch/` 为本地数据及运行空间。FM-v6 是因子挖掘的唯一执行主线，正式入口使用 [V6 研究合同](examples/factor_mining/research.contract.json)。旧版本迁移、压缩和重跑工具已退出源码与默认测试；当前 [操作说明](docs/guides/因子挖掘Agent使用说明.md) 不依赖旧 Goal。
+
 ## 数据说明
 
 [研究数据划分与使用规范](docs/data/研究数据划分与使用规范.md)：因子 A/B、策略内部开发与验证、最终测试的分工，以及既有数据暴露与工程验证记录。
