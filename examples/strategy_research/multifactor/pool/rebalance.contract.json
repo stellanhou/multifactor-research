@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "run_id": "multifactor-rebalance-20261003",
+  "source_run": "../../../../experiments/strategy_research/ablation_20261003/multifactor-ablation-20261003",
+  "holding_rank": 4,
+  "weight_buffer": 0.02
+}
