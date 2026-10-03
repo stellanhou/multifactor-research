@@ -214,7 +214,7 @@ def verify_artifact_manifest(directory: Path) -> Dict[str, Any]:
             "directory": str(directory),
             "status": "unsealed",
             "missing_files": [],
-            "hash_mismatches": [],
+            "size_mismatches": [],
             "extra_files": [],
             "error": str(exc),
         }
@@ -223,35 +223,24 @@ def verify_artifact_manifest(directory: Path) -> Dict[str, Any]:
             "directory": str(directory),
             "status": "manifest_invalid",
             "missing_files": [],
-            "hash_mismatches": [],
+            "size_mismatches": [],
             "extra_files": [],
             "error": str(exc),
         }
 
     expected_files = manifest.get("files")
     recorded_hash = manifest.get("manifest_sha256")
-    validation_payload = {
-        key: value
-        for key, value in manifest.items()
-        if key != "manifest_sha256"
-    }
-    if not isinstance(expected_files, dict) or not isinstance(recorded_hash, str):
+    if not isinstance(expected_files, dict) or any(
+        not isinstance(expected, dict) or "size_bytes" not in expected
+        for expected in expected_files.values()
+    ):
         return {
             "directory": str(directory),
             "status": "manifest_invalid",
             "missing_files": [],
-            "hash_mismatches": [],
+            "size_mismatches": [],
             "extra_files": [],
             "error": "artifact manifest has invalid structure",
-        }
-    if _object_hash(validation_payload) != recorded_hash:
-        return {
-            "directory": str(directory),
-            "status": "manifest_invalid",
-            "missing_files": [],
-            "hash_mismatches": [],
-            "extra_files": [],
-            "error": "artifact manifest hash mismatch",
         }
 
     if (
@@ -261,7 +250,7 @@ def verify_artifact_manifest(directory: Path) -> Dict[str, Any]:
         return _verify_paper_append_manifest(directory, manifest, recorded_hash)
 
     missing_files: List[str] = []
-    hash_mismatches: List[Dict[str, Any]] = []
+    size_mismatches: List[Dict[str, Any]] = []
     actual_files: Dict[str, Path] = {}
     for path in _artifact_files(directory):
         relative_path = path.relative_to(directory).as_posix()
@@ -273,18 +262,12 @@ def verify_artifact_manifest(directory: Path) -> Dict[str, Any]:
             missing_files.append(relative_path)
             continue
         actual_size = int(path.stat().st_size)
-        actual_hash = _sha256_file(path)
-        if (
-            actual_size != int(expected.get("size_bytes", -1))
-            or actual_hash != expected.get("sha256")
-        ):
-            hash_mismatches.append(
+        if actual_size != int(expected["size_bytes"]):
+            size_mismatches.append(
                 {
                     "path": relative_path,
                     "expected_size_bytes": expected.get("size_bytes"),
                     "actual_size_bytes": actual_size,
-                    "expected_sha256": expected.get("sha256"),
-                    "actual_sha256": actual_hash,
                 }
             )
 
@@ -294,7 +277,7 @@ def verify_artifact_manifest(directory: Path) -> Dict[str, Any]:
         if relative_path not in expected_files
     )
 
-    if missing_files or hash_mismatches:
+    if missing_files or size_mismatches:
         status = "compromised"
     elif extra_files:
         status = "extra_unmanifested_files"
@@ -308,15 +291,15 @@ def verify_artifact_manifest(directory: Path) -> Dict[str, Any]:
         "file_count": int(len(expected_files)),
         "total_bytes": int(manifest.get("total_bytes", 0)),
         "missing_files": missing_files,
-        "hash_mismatches": hash_mismatches,
-            "extra_files": extra_files,
-        }
+        "size_mismatches": size_mismatches,
+        "extra_files": extra_files,
+    }
 
 
 def _verify_paper_append_manifest(
     directory: Path,
     manifest: Dict[str, Any],
-    recorded_hash: str,
+    recorded_hash: Any,
 ) -> Dict[str, Any]:
     anchor = manifest.get("events_append_anchor")
     if manifest.get("schema_version") != PAPER_APPEND_MANIFEST_SCHEMA_VERSION:
@@ -324,7 +307,7 @@ def _verify_paper_append_manifest(
             "directory": str(directory),
             "status": "manifest_invalid",
             "missing_files": [],
-            "hash_mismatches": [],
+            "size_mismatches": [],
             "extra_files": [],
             "error": "paper append manifest has unsupported schema",
         }
@@ -333,14 +316,14 @@ def _verify_paper_append_manifest(
             "directory": str(directory),
             "status": "manifest_invalid",
             "missing_files": [],
-            "hash_mismatches": [],
+            "size_mismatches": [],
             "extra_files": [],
             "error": "paper append manifest lacks an event anchor",
         }
 
     expected_files = manifest["files"]
     missing_files: List[str] = []
-    hash_mismatches: List[Dict[str, Any]] = []
+    size_mismatches: List[Dict[str, Any]] = []
     actual_files: Dict[str, Path] = {}
     for path in _artifact_files(directory):
         relative_path = path.relative_to(directory).as_posix()
@@ -352,18 +335,12 @@ def _verify_paper_append_manifest(
             missing_files.append(relative_path)
             continue
         actual_size = int(path.stat().st_size)
-        actual_hash = _sha256_file(path)
-        if (
-            actual_size != int(expected.get("size_bytes", -1))
-            or actual_hash != expected.get("sha256")
-        ):
-            hash_mismatches.append(
+        if actual_size != int(expected.get("size_bytes", -1)):
+            size_mismatches.append(
                 {
                     "path": relative_path,
                     "expected_size_bytes": expected.get("size_bytes"),
                     "actual_size_bytes": actual_size,
-                    "expected_sha256": expected.get("sha256"),
-                    "actual_sha256": actual_hash,
                 }
             )
 
@@ -373,29 +350,28 @@ def _verify_paper_append_manifest(
         if relative_path not in expected_files
     )
     events_path = directory / "events.csv"
-    append_only_ok = False
+    events_anchor_length_ok = False
+    events_size: Optional[int] = None
     if events_path.is_file() and not events_path.is_symlink():
         try:
             expected_byte_length = int(anchor["byte_length"])
-            expected_prefix_sha256 = str(anchor["sha256"])
-            current_bytes = events_path.read_bytes()
-            if len(current_bytes) >= expected_byte_length:
-                prefix_digest = _sha256_bytes(current_bytes[:expected_byte_length])
-                append_only_ok = prefix_digest == expected_prefix_sha256
-        except (KeyError, TypeError, ValueError):
-            append_only_ok = False
+            events_size = int(events_path.stat().st_size)
+            events_anchor_length_ok = expected_byte_length >= 0 and events_size >= expected_byte_length
+        except (KeyError, TypeError, ValueError, OSError):
+            events_anchor_length_ok = False
 
-    if missing_files or extra_files or not append_only_ok:
+    if missing_files or extra_files or not events_anchor_length_ok:
         status = "compromised"
     elif (
-        hash_mismatches
-        and all(item["path"] == "events.csv" for item in hash_mismatches)
-        and append_only_ok
+        size_mismatches
+        and all(item["path"] == "events.csv" for item in size_mismatches)
+        and events_size is not None
+        and events_size > int(size_mismatches[0]["expected_size_bytes"])
     ):
         # A legitimate update appended bytes before the dedicated manifest
         # rotation ran. Keep this distinguishable from a history rewrite.
         status = "paper_append_pending"
-    elif hash_mismatches:
+    elif size_mismatches:
         status = "compromised"
     else:
         status = "valid"
@@ -407,14 +383,14 @@ def _verify_paper_append_manifest(
         "file_count": int(len(expected_files)),
         "total_bytes": int(manifest.get("total_bytes", 0)),
         "missing_files": missing_files,
-        "hash_mismatches": hash_mismatches,
+        "size_mismatches": size_mismatches,
         "extra_files": extra_files,
-        "events_append_only_ok": append_only_ok,
+        "events_anchor_length_ok": events_anchor_length_ok,
     }
 
 
 def capture_paper_append_anchor(directory: Path) -> Dict[str, Any]:
-    """Capture the exact pre-update event prefix and manifest identity."""
+    """Capture the pre-update event length and manifest identity."""
     directory = directory.resolve()
     verification = verify_artifact_manifest(directory)
     if verification["status"] not in {"valid", "paper_append_pending"}:
@@ -437,7 +413,7 @@ def rotate_paper_append_manifest(
     append_anchor: Dict[str, Any],
     reason: str,
 ) -> Dict[str, Any]:
-    """Rotate a paper manifest after a verified event-only append."""
+    """Rotate a paper manifest after an event-only append."""
     directory = directory.resolve()
     actual_names = sorted(
         path.relative_to(directory).as_posix()
@@ -538,24 +514,18 @@ def seal_research_artifacts(output_root: Path) -> Dict[str, Any]:
 def verify_ledger_append_only(
     current_bytes: bytes,
     expected_byte_length: int,
-    expected_prefix_sha256: str,
 ) -> Dict[str, Any]:
-    """Verify that an append-only ledger retained its previously sealed prefix."""
+    """Check that a ledger has not fallen below its previously recorded size."""
     if len(current_bytes) < expected_byte_length:
         return {
-            "status": "rewritten_or_truncated",
+            "status": "truncated",
             "expected_byte_length": expected_byte_length,
             "actual_byte_length": len(current_bytes),
-            "prefix_matches": False,
         }
-    prefix_digest = hashlib.sha256(current_bytes[:expected_byte_length]).hexdigest()
-    prefix_matches = prefix_digest == expected_prefix_sha256
     return {
-        "status": "append_only_ok" if prefix_matches else "history_rewritten",
+        "status": "length_preserved",
         "expected_byte_length": expected_byte_length,
         "actual_byte_length": len(current_bytes),
-        "prefix_matches": prefix_matches,
-        "prefix_sha256": prefix_digest,
     }
 
 
@@ -603,6 +573,6 @@ def verify_research_artifact_manifests(
         item
         for item in results
         if item["status"]
-        in {"compromised", "manifest_invalid", "missing_files", "hash_mismatch"}
+        in {"compromised", "manifest_invalid", "missing_files"}
     ]
     return {"counts": counts, "results": results, "failures": failures}

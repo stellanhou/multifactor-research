@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "run_id": "multifactor-ablation-20261003",
+  "pool_contract": "icir.contract.json"
+}

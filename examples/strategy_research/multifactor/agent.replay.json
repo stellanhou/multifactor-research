@@ -1,0 +1,60 @@
+[
+  {
+    "role": "review",
+    "response": {
+      "summary": "基线已完成工程核算，但原库含事后补值；先审查移除因子的收益与成本权衡。",
+      "findings": [
+        {
+          "claim": "覆盖与原卡证据的用途需要一并考虑，不能将历史回放当作前向策略验证。",
+          "evidence_refs": [
+            "data_usage",
+            "coverage"
+          ]
+        },
+        {
+          "claim": "已有移除F1的实验可用来复算成本下降与净收益的取舍。",
+          "evidence_refs": [
+            "drop:F1",
+            "baseline_metrics"
+          ]
+        }
+      ],
+      "limitations": [
+        "已有全部历史基线结果已经暴露。"
+      ]
+    }
+  },
+  {
+    "role": "design",
+    "response": {
+      "action": "experiment",
+      "hypothesis": "复算F2和F3的等权子集，检查移除F1后成本下降是否足以改善净收益；按既有证据预期收益改善假设不成立。",
+      "strategy_card_ids": [
+        "fmv6-history-multi-20261002-0071--candidate-0003",
+        "fmv6-history-multi-20261002-0109--candidate-0002"
+      ],
+      "evidence_refs": [
+        "drop:F1",
+        "baseline_metrics"
+      ]
+    }
+  },
+  {
+    "role": "review",
+    "response": {
+      "summary": "子集计算已完成；用新的实验产物核对净收益和成本。即使减少费用，仍需比较全因子等权表现。",
+      "findings": [
+        {
+          "claim": "本轮复算只验证同一快照、共同掩码和账户规则的可执行性；结果属于已暴露历史的工程重复。",
+          "evidence_refs": [
+            "agent-experiment:001",
+            "data_usage"
+          ]
+        }
+      ],
+      "limitations": [
+        "固定回复不能证明真实模型审查能力或选择增量。"
+      ]
+    }
+  }
+]

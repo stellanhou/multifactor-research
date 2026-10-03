@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "run_id": "multifactor-engineering-20261002",
+  "purpose": "engineering",
+  "stage": "internal_validation",
+  "start": "2025-09-01T00:00:00Z",
+  "end": "2025-09-15T00:00:00Z",
+  "warmup_hours": 168,
+  "horizon_hours": 24,
+  "cards": [
+    "cards/fmv6-history-multi-20261002-0021--candidate-0001.json",
+    "cards/fmv6-history-multi-20261002-0071--candidate-0003.json",
+    "cards/fmv6-history-multi-20261002-0109--candidate-0002.json"
+  ],
+  "universe": "universe.csv",
+  "prior_data_use": "原C已用于开发/验证。本轮仅用历史重检的三张24h通过卡作工程回放；其B结果属于规则选择后的探索证据。固定10币池用于核对程序，不代表已验证历史选币规则。",
+  "data_processing": "主库经过2026-09-22事后插值及边界补值。该窗口资金费结算标记价格含事后补写；没有可证实的完整逐行修复掩码。所有输入按retrospective_or_unknown处理，不证明完整因果历史策略收益。",
+  "costs": {
+    "initial_capital": 10000.0,
+    "fee_bps": 10.0,
+    "slippage_bps": 5.0,
+    "stress_multiplier": 2.0
+  },
+  "portfolio": {
+    "long_count": 2,
+    "short_count": 2,
+    "gross_exposure": 0.8,
+    "max_asset_weight": 0.2,
+    "rebalance_hours": 24,
+    "margin_fraction": 0.1
+  }
+}

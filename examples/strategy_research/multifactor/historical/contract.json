@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "run_id": "multifactor-history-20261002",
+  "dataset_manifest": "../../../../experiments/strategy_research/historical_20261002/data/manifest.json",
+  "cards": [
+    "cards/fmv6-history-multi-20261002-0021--candidate-0001.json",
+    "cards/fmv6-history-multi-20261002-0071--candidate-0003.json",
+    "cards/fmv6-history-multi-20261002-0109--candidate-0002.json",
+    "cards/fmv6-history-multi-20261002-0109--candidate-0003.json"
+  ],
+  "universe": "universe.csv",
+  "horizon_hours": 24,
+  "warmup_hours": 168,
+  "development_start": "2022-08-01T00:00:00Z",
+  "validation_start": "2025-08-01T00:00:00Z",
+  "validation_end": "2026-08-01T00:00:00Z",
+  "prior_data_use": "A+B已参与因子开发与规则选择；C已暴露，仅作内部验证。P4在C的工程结果不进入本轮Agent；本轮AB初始drop结果封存，新组合按预定预算选择。固定10币为研究队列，不代表已验证的历史选币规则。",
+  "data_processing": "价格与资金费率从官方归档重新恢复到隔离数据库，无价格/费率插值。资金费结算价按用户确认的口径用事件前最后一根完整原始1m标记价close估算，最大年龄60秒；原始发布/接收延迟未认证。",
+  "costs": {
+    "initial_capital": 10000.0,
+    "fee_bps": 10.0,
+    "slippage_bps": 5.0,
+    "stress_multiplier": 2.0
+  },
+  "portfolio": {
+    "long_count": 2,
+    "short_count": 2,
+    "gross_exposure": 0.8,
+    "max_asset_weight": 0.2,
+    "rebalance_hours": 24,
+    "margin_fraction": 0.1
+  },
+  "experiment_budget": 2,
+  "context_bytes": 256000,
+  "qualification_gates": {
+    "min_net_return": 0.0,
+    "max_drawdown": 0.15,
+    "min_traded_bars": 1,
+    "min_stress_return": 0.0
+  },
+  "candidate_selection": "max_AB_net_return_then_lower_drawdown_then_sorted_card_ids"
+}
