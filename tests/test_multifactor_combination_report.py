@@ -13,6 +13,7 @@ from crypto_quant.research.strategy_research.multifactor_combination_report impo
     _selected_scope,
     _window_comparison,
     verify_account,
+    verify_account_ledger,
 )
 
 
@@ -123,6 +124,22 @@ def test_independent_reconciliation_includes_funding_and_ending_unrealized(tmp_p
     assert verified["funding_events"] == 3
     assert verified["average_gross_exposure"] > 0
     assert np.isclose(account.metrics["net_return"], account.metrics["final_equity"] / INITIAL_CAPITAL - 1)
+
+
+def test_fixed_signal_ledger_audit_does_not_fabricate_a_model_schedule(tmp_path):
+    directory = tmp_path / "account"
+    _account(directory)
+    metadata = json.loads((directory / "account.json").read_text())
+    expected = verify_account(directory, metadata)
+    del metadata["model_schedule"]
+    assert verify_account_ledger(directory, metadata) == expected
+    with pytest.raises(ValueError, match="model_schedule"):
+        verify_account(directory, metadata)
+    ledger = pd.read_csv(directory / "ledger.csv", index_col=0, float_precision="round_trip")
+    ledger.iloc[0, ledger.columns.get_loc("cash")] += 1
+    ledger.to_csv(directory / "ledger.csv")
+    with pytest.raises(ValueError):
+        verify_account_ledger(directory, metadata)
 
 
 def test_independent_reconciliation_fails_on_cash_ledger_corruption(tmp_path):

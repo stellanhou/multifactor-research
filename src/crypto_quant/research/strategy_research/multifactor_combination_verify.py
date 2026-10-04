@@ -274,6 +274,7 @@ def audit_validation_mask(evaluator: Any, windows: Any, *, factor_count: int,
 
 def audit_training_evaluator(evaluator: Any, windows: Any, training_cube: np.ndarray,
                             *, factor_count: int,
+                            horizon_hours: int = HORIZON_HOURS,
                             expected_hours: int = SOURCE_HOURS) -> dict[str, Any]:
     """Prove clustering and single-factor prescreen consume only training hours."""
     source_times = _check_calendar(evaluator.times, name="training evaluator source times",
@@ -292,7 +293,7 @@ def audit_training_evaluator(evaluator: Any, windows: Any, training_cube: np.nda
     expected_complete = np.isfinite(values).all(axis=2)
     if complete.shape != expected_complete.shape or not np.array_equal(complete, expected_complete):
         raise AssertionError("training prescreen does not use the shared full-pool complete-factor mask")
-    expected_end = expected_times[-1] + (HORIZON_HOURS + 1) * HOUR
+    expected_end = expected_times[-1] + (horizon_hours + 1) * HOUR
     if pd.Timestamp(evaluator.fit_time).tz_convert("UTC") > expected_end + HOUR:
         raise AssertionError("training prescreen account extends past its training label boundary")
     return {
@@ -827,19 +828,20 @@ def run_e0_window(context: Any, *, prepared: Any, fit_time: pd.Timestamp, output
         raise ValueError(f"E0 window is not fully eligible: {context.readiness_status}")
     training_evaluator = context.prescreen_evaluator(batch_candidates)
     training_cube = np.asarray(context.training_values, dtype=float)
-    window_record = audit_windows(windows, fit_time=fit_time)
+    horizon = prepared.dev_contract.horizon_hours
+    window_record = audit_windows(windows, fit_time=fit_time, horizon_hours=horizon)
     training_record = audit_training_sample(
-        prepared, windows, x_train=context.x_train, y_train=context.y_train,
+        prepared, windows, x_train=context.x_train, y_train=context.y_train, horizon_hours=horizon,
         training_source_times=getattr(context, "training_source_times", None),
     )
     refit_record = audit_training_sample(
-        prepared, windows, x_train=context.x_refit, y_train=context.y_refit,
+        prepared, windows, x_train=context.x_refit, y_train=context.y_refit, horizon_hours=horizon,
         training_source_times=getattr(context, "refit_source_times", None),
         calendar_times=windows.refit,
     )
     training_mask_record = audit_training_evaluator(
         training_evaluator, windows, training_cube,
-        factor_count=len(factor_names), expected_hours=SOURCE_HOURS,
+        factor_count=len(factor_names), expected_hours=SOURCE_HOURS, horizon_hours=horizon,
     )
     if training_evaluator.method != "equal":
         raise AssertionError("cluster pre-screen must use standardized equal-weight single factors")
@@ -984,7 +986,7 @@ def run_e0_window(context: Any, *, prepared: Any, fit_time: pd.Timestamp, output
         "stage": "E0",
         "status": "passed",
         "fit_time": fit_time,
-        "horizon_hours": HORIZON_HOURS,
+        "horizon_hours": horizon,
         "window_audit": window_record.as_dict(),
         "training_sample_audit": training_record,
         "post_selection_refit_sample_audit": refit_record,

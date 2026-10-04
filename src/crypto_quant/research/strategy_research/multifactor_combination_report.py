@@ -121,9 +121,19 @@ def _read_account(directory: Path, metadata: dict[str, Any]) -> dict[str, Any]:
 def verify_account(directory: Path, metadata: dict[str, Any],
                    tables: dict[str, Any] | None = None) -> dict[str, Any]:
     """Recompute account conservation, trade lifecycle, event timing and metrics."""
-    directory = Path(directory)
     _validate_route_metadata(metadata)
     _verify_model_schedule(metadata)
+    return verify_account_ledger(directory, metadata, tables)
+
+
+def verify_account_ledger(directory: Path, metadata: dict[str, Any],
+                          tables: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Reconcile a fixed target account without asserting a model-search schema.
+
+    The combination90 wrapper above additionally verifies its frozen model
+    schedule. Fixed-signal experiments supply their own signal provenance.
+    """
+    directory = Path(directory)
     if tables is None:
         tables = _read_account(directory, metadata)
     ledger, positions = tables["ledger"], tables["positions"]
