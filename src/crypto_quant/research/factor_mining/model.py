@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,3 +49,24 @@ class ApiCallError(RuntimeError):
 class JsonModel(Protocol):
     def complete(self, messages: list[dict[str, str]], *, max_output_tokens: int | None,
                  session_id: str) -> ModelReply: ...
+
+
+FACTOR_ROLES = {"ideator", "calculator", "evaluator", "optimizer"}
+
+
+class RoleModels:
+    """Keep each factor role on its explicitly configured model, including repairs."""
+
+    def __init__(self, models: dict[str, JsonModel]):
+        require(set(models) == FACTOR_ROLES, "configure exactly the four factor roles")
+        self.models = models
+
+    def settings(self):
+        return {"provider": "factor-role-models",
+                "roles": {role: model.settings() for role, model in self.models.items()}}
+
+    def complete(self, messages, *, max_output_tokens, session_id):
+        role = json.loads(messages[1]["content"])["role"]
+        require(role in self.models, "unknown factor model role")
+        return self.models[role].complete(messages, max_output_tokens=max_output_tokens,
+                                          session_id=session_id)

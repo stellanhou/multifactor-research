@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "run_id": "multifactor-selection-20261003",
+  "source_run": "../../../../experiments/strategy_research/ablation_20261003/multifactor-ablation-20261003",
+  "methods": [
+    "equal",
+    "rolling_icir",
+    "cluster",
+    "ridge",
+    "elastic_net",
+    "pool"
+  ],
+  "rebalance_routes": [
+    {
+      "name": "R0",
+      "rank_buffer": false,
+      "position_buffer": false,
+      "hourly": false
+    },
+    {
+      "name": "R4",
+      "rank_buffer": true,
+      "position_buffer": true,
+      "hourly": true
+    }
+  ],
+  "selection_policy": {
+    "fit_window_hours": 2160,
+    "min_train_periods": 720,
+    "refit_every_hours": 168,
+    "min_cross_section_symbols": 3,
+    "icir_window_hours": 720,
+    "icir_min_periods": 168,
+    "correlation_window_hours": 720,
+    "cluster_abs_correlation_threshold": 0.8,
+    "inner_validation_hours": 504,
+    "min_inner_validation_periods": 168,
+    "alpha_grid": [
+      0.00001,
+      0.001,
+      0.1,
+      10.0
+    ],
+    "l1_ratio": 0.5,
+    "pool_capacity": 8,
+    "pool_search_budget": 32,
+    "min_objective_improvement": 0.000001
+  },
+  "second_layer": {
+    "continuous_target_weight_buffer": 0.02,
+    "policies": [
+      {
+        "method": "fixed",
+        "gross_exposure": 0.8,
+        "max_asset_weight": 0.2,
+        "lookback_hours": 720,
+        "min_history": 168,
+        "mean_gate": false,
+        "covariance_shrinkage": 0.1
+      },
+      {
+        "method": "risk_budget",
+        "gross_exposure": 0.8,
+        "max_asset_weight": 0.2,
+        "lookback_hours": 720,
+        "min_history": 168,
+        "mean_gate": true,
+        "covariance_shrinkage": 0.1
+      }
+    ]
+  }
+}

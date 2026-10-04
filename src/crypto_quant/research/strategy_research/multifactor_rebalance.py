@@ -35,8 +35,8 @@ def _decisions(account, signals):
     if "action" not in orders:
         old, new = orders.current_quantity, orders.target_quantity
         changed = old != new
-        orders["actual_weight"] = old * orders.signal_close / orders.signal_equity
-        orders["execution_weight"] = new * orders.signal_close / orders.signal_equity
+        orders["actual_weight"] = (old * orders.signal_close / orders.signal_equity).where(old != 0, 0.0)
+        orders["execution_weight"] = (new * orders.signal_close / orders.signal_equity).where(new != 0, 0.0)
         orders["lower_weight"] = orders.target_weight.abs()
         orders["upper_weight"] = orders.target_weight.abs()
         orders["action"] = np.where(~changed, "hold", np.where(new.abs() < old.abs(), "reduce", "add"))

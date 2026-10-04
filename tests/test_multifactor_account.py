@@ -56,6 +56,97 @@ def _run(start, index, frames, targets, funding, *, end=None):
     )
 
 
+def test_announced_inactive_asset_stays_flat_without_synthetic_prices():
+    start, index, frames, targets, funding = _account_inputs()
+    frames["AUSDT"]["inactive"] = [False, False, False, True]
+    frames["AUSDT"].loc[index[-1], ["open", "close", "mark_close"]] = np.nan
+    targets = pd.DataFrame(
+        {"AUSDT": [0.25, 0.0, 0.0], "BUSDT": [-0.25, -0.25, -0.25]},
+        index=index[:3],
+    )
+    result = _run(start, index, frames, targets, funding)
+    final = result.positions.loc[(result.positions.symbol == "AUSDT")].iloc[-1]
+    assert final.quantity == final.gross_notional == final.signed_notional == 0.0
+    assert pd.isna(final.mark_price)
+    assert np.isfinite(result.ledger.equity).all()
+    assert len(result.fills.loc[result.fills.symbol == "AUSDT"]) == 2
+
+
+@pytest.mark.parametrize("held", [False, True])
+def test_inactive_asset_rejects_held_position_or_new_target(held):
+    start, index, frames, targets, funding = _account_inputs()
+    frames["AUSDT"]["inactive"] = [False, False, False, True]
+    frames["AUSDT"].loc[index[-1], ["open", "close", "mark_close"]] = np.nan
+    if not held:
+        targets = pd.DataFrame({"AUSDT": [0.0, 0.25], "BUSDT": [0.0, 0.0]},
+                               index=index[[0, 2]])
+    with pytest.raises(ValueError, match="inactive hour"):
+        _run(start, index, frames, targets, funding)
+
+
+def test_inactive_flag_does_not_permit_missing_active_prices():
+    start, index, frames, targets, funding = _account_inputs()
+    frames["AUSDT"]["inactive"] = False
+    frames["AUSDT"].loc[index[-1], "open"] = np.nan
+    with pytest.raises(ValueError, match="finite and positive"):
+        _run(start, index, frames, targets, funding)
+
+
+@pytest.mark.parametrize("mode", ["rank_buffer", "continuous_buffer"])
+def test_buffered_accounts_clear_position_before_inactive_prices(mode):
+    from crypto_quant.research.strategy_research.multifactor_account import (
+        ContinuousTargetPolicy, RebalancePolicy,
+    )
+    start, index, frames, _, funding = _account_inputs()
+    frames["AUSDT"]["inactive"] = [False, False, False, True]
+    frames["AUSDT"].loc[index[-1], ["open", "close", "mark_close"]] = np.nan
+    if mode == "rank_buffer":
+        targets = None
+        kwargs = dict(
+            scores=pd.DataFrame({"AUSDT": [2.0, np.nan, np.nan],
+                                 "BUSDT": [1.0, 1.0, 1.0]}, index=index[:3]),
+            rebalance_policy=RebalancePolicy(long_count=1, short_count=1,
+                gross_exposure=0.5, max_asset_weight=0.25, holding_rank=2, weight_buffer=0.02),
+        )
+    else:
+        targets = pd.DataFrame({"AUSDT": [0.25, 0.0, 0.0], "BUSDT": [-0.25]*3}, index=index[:3])
+        kwargs = dict(continuous_target_policy=ContinuousTargetPolicy(
+            gross_exposure=0.5, max_asset_weight=0.25, weight_buffer=0.02))
+    account = run_perpetual_account(frames, targets, funding, initial_capital=1000.0,
+        fee_bps=10.0, slippage_bps=5.0, start=start, end=start+pd.Timedelta(hours=3),
+        margin_fraction=0.05, **kwargs)
+    last = account.orders.loc[account.orders.symbol == "AUSDT"].iloc[-1]
+    assert last.target_quantity == last.current_quantity == 0.0
+    assert last.actual_weight == last.execution_weight == 0.0
+    assert np.isfinite(account.ledger.equity).all()
+
+
+@pytest.mark.parametrize("mode", ["scheduled", "rank_buffer", "continuous_buffer"])
+def test_asset_inactive_for_entire_validation_account_requires_no_prices(mode):
+    from crypto_quant.research.strategy_research.multifactor_account import (
+        ContinuousTargetPolicy, RebalancePolicy,
+    )
+    start, index, frames, _, funding = _account_inputs()
+    frames["AUSDT"][["open", "close", "mark_close"]] = np.nan
+    frames["AUSDT"]["inactive"] = True
+    targets = pd.DataFrame({"AUSDT": [0.0]*3, "BUSDT": [0.25]*3}, index=index[:3])
+    kwargs = {}
+    if mode == "rank_buffer":
+        targets = None
+        kwargs = dict(scores=pd.DataFrame({"AUSDT": [np.nan]*3, "BUSDT": [1.0]*3}, index=index[:3]),
+            rebalance_policy=RebalancePolicy(long_count=1, short_count=1,
+                gross_exposure=0.5, max_asset_weight=0.25, holding_rank=2, weight_buffer=0.02))
+    elif mode == "continuous_buffer":
+        kwargs = dict(continuous_target_policy=ContinuousTargetPolicy(
+            gross_exposure=0.5, max_asset_weight=0.25, weight_buffer=0.02))
+    account = run_perpetual_account(frames, targets, funding, initial_capital=1000.0,
+        fee_bps=10.0, slippage_bps=5.0, start=start, end=start+pd.Timedelta(hours=3),
+        margin_fraction=0.05, **kwargs)
+    inactive = account.positions.loc[account.positions.symbol == "AUSDT"]
+    assert inactive.quantity.eq(0.0).all() and inactive.mark_price.isna().all()
+    assert np.isfinite(account.ledger.equity).all()
+
+
 def test_rank_targets_ties_shortages_cash_and_fixed_rebalance_cycle():
     start = pd.Timestamp("2024-01-01T01:00:00Z")
     index = pd.date_range(start - pd.Timedelta(hours=1), periods=6, freq="h")

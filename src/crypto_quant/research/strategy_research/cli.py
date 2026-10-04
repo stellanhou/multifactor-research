@@ -27,6 +27,42 @@ class ReplayModel:
 
 def add_arguments(parser):
     commands = parser.add_subparsers(dest="research_action", required=True)
+    baseline = commands.add_parser("baseline", help="deterministic USD-M multi-factor baseline; no model service")
+    baseline.add_argument("--contract", type=Path, required=True)
+    baseline.add_argument("--db", type=Path, required=True)
+    baseline.add_argument("--output", type=Path, default=Path("experiments/strategy_research"))
+    research_baseline = commands.add_parser("research-baseline", help="deterministic research baseline from a validated raw dataset")
+    research_baseline.add_argument("--contract", type=Path, required=True)
+    research_baseline.add_argument("--output", type=Path, required=True)
+    pool = commands.add_parser("pool-run", help="inventory the entire card pool and execute bounded deterministic family-block research")
+    pool.add_argument("--contract", type=Path, required=True)
+    pool.add_argument("--output", type=Path, required=True)
+    ablation = commands.add_parser("ablation-run", help="four-arm symmetric-orthogonalization and rolling-ICIR ablation")
+    ablation.add_argument("--contract", type=Path, required=True)
+    ablation.add_argument("--output", type=Path, required=True)
+    rebalance = commands.add_parser("rebalance-run", help="five-arm position-aware rebalance comparison on frozen B signals")
+    rebalance.add_argument("--contract", type=Path, required=True)
+    rebalance.add_argument("--output", type=Path, required=True)
+    selection = commands.add_parser("selection-run", help="causal factor-selection routes and netted horizon-portfolio comparison")
+    selection.add_argument("--contract", type=Path, required=True)
+    selection.add_argument("--output", type=Path, required=True)
+    historical = commands.add_parser("historical-run", help="A+B bounded research, freeze candidate, then C internal validation")
+    historical.add_argument("--contract", type=Path, required=True)
+    historical.add_argument("--output", type=Path, default=Path("experiments/strategy_research/historical_20261002/runs"))
+    historical_mode = historical.add_mutually_exclusive_group()
+    historical_mode.add_argument("--replay", type=Path)
+    historical_mode.add_argument("--model")
+    add_model_arguments(historical, include_model=False)
+    historical.set_defaults(provider="codex")
+    agent = commands.add_parser("agent-run", help="review frozen multi-factor evidence and execute bounded subset experiments")
+    agent.add_argument("--baseline", type=Path, required=True)
+    agent.add_argument("--session", type=Path, required=True)
+    agent.add_argument("--output", type=Path, default=Path("experiments/strategy_research/multifactor_agent"))
+    agent_mode = agent.add_mutually_exclusive_group()
+    agent_mode.add_argument("--replay", type=Path)
+    agent_mode.add_argument("--model")
+    add_model_arguments(agent, include_model=False)
+    agent.set_defaults(provider="codex")
     run = commands.add_parser("run", help="develop on A+B; never load C internal validation")
     run.add_argument("--contract", type=Path, required=True)
     run.add_argument("--idea", type=Path, required=True)
@@ -56,6 +92,64 @@ def add_arguments(parser):
 
 
 def execute(args):
+    if args.research_action == "selection-run":
+        from .multifactor_selection_research import run_selection_research
+        result = run_selection_research(args.contract, args.output)
+        return {"run_id": result["run_id"], "status": result["status"], "root": result["root"],
+                "account_runs": result["plan"]["account_runs"], "model_called": False}
+    if args.research_action == "rebalance-run":
+        from .multifactor_rebalance import run_rebalance
+        result = run_rebalance(args.contract, args.output)
+        return {"run_id": result["run_id"], "status": result["status"], "root": result["root"],
+                "account_runs": result["plan"]["account_runs"], "model_called": False}
+    if args.research_action == "ablation-run":
+        from .multifactor_ablation import run_ablation
+        result = run_ablation(args.contract, args.output)
+        return {"run_id": result["run_id"], "status": result["status"], "root": result["root"],
+                "account_runs": result["plan"]["account_runs"], "model_called": False}
+    if args.research_action == "pool-run":
+        from .multifactor_pool_research import run_pool_research
+        result = run_pool_research(args.contract, args.output)
+        return {"run_id": result["run_id"], "status": result["status"], "root": result["root"],
+                "admitted_cards": result["unique_admitted_card_count"],
+                "new_experiments": result["plan"]["new_experiments_planned"],
+                "selected_experiment": result["selected_ab"]["experiment_id"],
+                "ab_metrics": result["selected_ab"]["metrics"], "c_metrics": result["selected_c"]["metrics"],
+                "qualified": result["qualified"], "model_called": False}
+    if args.research_action == "baseline":
+        from .multifactor_workflow import run_baseline
+        return run_baseline(args.contract, args.db, args.output)
+    if args.research_action == "research-baseline":
+        from .multifactor_workflow import run_research_baseline
+        return run_research_baseline(args.contract, args.output)
+    if args.research_action == "historical-run":
+        from .multifactor_historical import run_historical
+        from .multifactor_agent_workflow import run_research_agent_session
+        if args.replay:
+            model = ReplayModel(json.loads(args.replay.read_text(encoding="utf-8")))
+            mode = "replay"
+            settings = {"provider": "fixed-replay", "model": "fixed-replay"}
+        else:
+            if args.provider == "codex" and args.model is None:
+                args.model = "gpt-6-luna"
+            model = model_from_args(args)
+            mode, settings = "live", model.settings()
+        return run_historical(args.contract, args.output, model, model_mode=mode,
+                              model_settings=settings, agent_runner=run_research_agent_session)
+    if args.research_action == "agent-run":
+        from .multifactor_agent_workflow import run_agent_session
+        if args.replay:
+            model = ReplayModel(json.loads(args.replay.read_text(encoding="utf-8")))
+            model_mode = "replay"
+            settings = {"provider": "fixed-replay", "model": "fixed-replay"}
+        else:
+            if args.provider == "codex" and args.model is None:
+                args.model = "gpt-6-luna"
+            model = model_from_args(args)
+            model_mode = "live"
+            settings = model.settings()
+        return run_agent_session(args.baseline, args.session, args.output, model,
+                                 model_mode=model_mode, model_settings=settings)
     if args.research_action == "check-data":
         contract = StrategyResearchContract.from_dict(json.loads(args.contract.read_text(encoding="utf-8")))
         usage = {**strategy_usage(contract), "source_database": str(args.db.resolve())}

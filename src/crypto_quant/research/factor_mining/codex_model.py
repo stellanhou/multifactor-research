@@ -24,7 +24,7 @@ DEFAULT_MODEL = "gpt-5.6-luna"
 PROVIDER = "codex-sdk-chatgpt"
 
 
-def _config(directory, codex_bin=None):
+def _config(directory, codex_bin=None, *, service_tier=None):
     # These are process-local overrides: the user's Codex settings and login stay intact.
     # Research evidence is supplied explicitly. Codex may retain its global AGENTS.md;
     # project documents, personal memories and research-external tools are disabled.
@@ -40,6 +40,8 @@ def _config(directory, codex_bin=None):
         'features.skip_host_skill_discovery=true', 'developer_instructions=""',
         *(f"features.{name}=false" for name in disabled),
     )
+    if service_tier is not None:
+        overrides += ('features.fast_mode=true',)
     options = {"cwd": directory, "config_overrides": overrides,
                "env": {"OPENAI_API_KEY": "", "CODEX_API_KEY": ""}}
     if codex_bin is not None:
@@ -87,10 +89,12 @@ async def _thread_config(codex):
 
 class CodexModel:
     def __init__(self, model=DEFAULT_MODEL, *, reasoning_effort="max", timeout_seconds=300,
-                 codex_bin=None):
+                 codex_bin=None, service_tier=None):
         self.model = text(model, "model")
         require(reasoning_effort in {"low", "medium", "high", "xhigh", "max"}, "unsupported reasoning effort")
         require(type(timeout_seconds) is int and timeout_seconds > 0, "timeout must be positive")
+        require(service_tier in {None, "priority"}, "supported service tier is priority (Fast)")
+        self.service_tier = service_tier
         self.reasoning_effort, self.timeout_seconds = reasoning_effort, timeout_seconds
         self.codex_bin, self.codex_runtime_version = (
             _codex_binary(codex_bin) if codex_bin is not None else (None, None))
@@ -102,6 +106,8 @@ class CodexModel:
                                         else version("openai-codex-cli-bin"))}
         if self.codex_bin is not None:
             settings["codex_bin"] = self.codex_bin
+        if self.service_tier is not None:
+            settings["service_tier"] = self.service_tier
         return settings
 
     def available_models(self):
@@ -109,7 +115,7 @@ class CodexModel:
 
     async def _models(self):
         with tempfile.TemporaryDirectory(prefix="quant-codex-") as directory:
-            codex = AsyncCodexClient(_config(directory, self.codex_bin))
+            codex = AsyncCodexClient(_config(directory, self.codex_bin, service_tier=self.service_tier))
             try:
                 async with asyncio.timeout(self.timeout_seconds):
                     await _subscription(codex)
@@ -132,7 +138,7 @@ class CodexModel:
         trace = {"session_id": session_id, "settings": self.settings(), "events": [],
                  "generation_started": False}
         with tempfile.TemporaryDirectory(prefix="quant-codex-") as directory:
-            codex = AsyncCodexClient(_config(directory, self.codex_bin))
+            codex = AsyncCodexClient(_config(directory, self.codex_bin, service_tier=self.service_tier))
             try:
                 async with asyncio.timeout(self.timeout_seconds):
                     await _subscription(codex)
@@ -142,6 +148,10 @@ class CodexModel:
                     require(any(r.reasoning_effort.value == self.reasoning_effort
                                 for r in selected.supported_reasoning_efforts),
                             "model does not support requested reasoning effort")
+                    if self.service_tier is not None:
+                        require(selected.service_tiers is not None
+                                and any(tier.id == self.service_tier for tier in selected.service_tiers),
+                                "model does not support requested Fast service tier")
                     # Fresh ephemeral threads isolate A/B, roles and corrections. The transcript
                     # is lossless; the SDK accepts turn text, not an arbitrary chat-message array.
                     instructions = (messages[0]["content"] + "\n\n"
@@ -151,15 +161,24 @@ class CodexModel:
                         "Answer its final user turn with only the requested JSON object.")
                     prompt = json.dumps(messages[1:], ensure_ascii=False)
                     trace["request"] = {"base_instructions": instructions, "input": prompt}
-                    started = await codex.thread_start({"model": self.model, "modelProvider": "openai",
+                    thread_options = {"model": self.model, "modelProvider": "openai",
                         "cwd": directory, "baseInstructions": instructions, "developerInstructions": "",
                         "ephemeral": True, "sandbox": "read-only", "approvalPolicy": "never",
-                        "config": await _thread_config(codex)})
+                        "config": await _thread_config(codex)}
+                    turn_options = {"effort": self.reasoning_effort}
+                    if self.service_tier is not None:
+                        thread_options["serviceTier"] = self.service_tier
+                        turn_options["serviceTier"] = self.service_tier
+                    started = await codex.thread_start(thread_options)
                     require(started.model == self.model and started.model_provider == "openai",
                             "Codex started with an unexpected model/provider")
+                    if self.service_tier is not None:
+                        require(started.service_tier == self.service_tier,
+                                "Codex did not accept the requested Fast service tier")
+                        trace["accepted_service_tier"] = started.service_tier
                     trace["thread_id"] = started.thread.id
                     trace["generation_started"] = True
-                    turn = await codex.turn_start(started.thread.id, prompt, {"effort": self.reasoning_effort})
+                    turn = await codex.turn_start(started.thread.id, prompt, turn_options)
                     trace["turn_id"] = turn.turn.id
                     answer, usage, completed = None, None, None
                     while completed is None:

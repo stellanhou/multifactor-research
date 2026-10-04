@@ -198,16 +198,28 @@ def modification_plan(value: Any) -> dict[str, Any]:
     for name in task_fields:
         text(task[name], name)
     experiment = value["experiment_design"]
-    experiment_fields = {"question", "metric", "min_improvement", "max_ic_loss", "expected_outcome",
-                         "stop_condition", "pause_condition"}
-    require(isinstance(experiment, dict) and set(experiment) == experiment_fields,
+    base_experiment_fields = {"question", "metric", "min_improvement", "max_ic_loss", "expected_outcome",
+                              "stop_condition", "pause_condition"}
+    require(isinstance(experiment, dict), "experiment design must be an object")
+    metric = experiment.get("metric")
+    if metric == "rank_displacement":
+        experiment_fields = base_experiment_fields | {"horizon_hours", "displacement_hours"}
+    else:
+        experiment_fields = base_experiment_fields
+    require(set(experiment) == experiment_fields,
             "experiment design fields do not match the declared schema")
     for name in ("question", "expected_outcome", "stop_condition", "pause_condition"):
         text(experiment[name], name)
-    require(experiment["metric"] in {"rank_ic", "directional_spread"},
+    require(metric in {"rank_ic", "directional_spread", "rank_displacement"},
             "primary improvement metric is not supported")
-    require(number(experiment["min_improvement"], "min_improvement") > 0,
-            "minimum improvement must be positive")
+    if metric == "rank_displacement":
+        for name in ("horizon_hours", "displacement_hours"):
+            require(type(experiment[name]) is int and experiment[name] in {1, 4, 24},
+                    f"{name} must be explicitly set to 1, 4 or 24")
+    min_improvement = number(experiment["min_improvement"], "min_improvement")
+    require(min_improvement > 0,
+            "rank-displacement min_improvement must be a positive absolute D decrease"
+            if metric == "rank_displacement" else "minimum improvement must be positive")
     require(number(experiment["max_ic_loss"], "max_ic_loss") >= 0,
             "maximum IC loss must be nonnegative")
     if value["restart_of"] is None:

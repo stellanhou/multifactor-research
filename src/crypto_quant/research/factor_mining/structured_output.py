@@ -66,7 +66,27 @@ def _extras(value, schema, extras, pointer):
     if "anyOf" in schema:
         if value is None:
             return
-        schema = next(s for s in schema["anyOf"] if s.get("type") != "null")
+        branches = [branch for branch in schema["anyOf"] if branch.get("type") != "null"]
+        if len(branches) == 1:
+            schema = branches[0]
+        else:
+            # The controlled experiment union is discriminated by its metric.
+            matches = []
+            for index, branch in enumerate(branches):
+                try:
+                    TypeAdapter(_type(branch, f"AnyOfBranch{index}")).validate_python(value, strict=True)
+                except ValidationError:
+                    continue
+                matches.append(branch)
+            if not matches and isinstance(value, dict):
+                matches = [branch for branch in branches
+                           if value.get("metric") in branch.get("properties", {}).get("metric", {}).get("enum", [])]
+                if not matches and {"horizon_hours", "displacement_hours"} & value.keys():
+                    matches = [branch for branch in branches
+                               if "horizon_hours" in branch.get("properties", {})]
+            if not matches:
+                return
+            schema = matches[0]
     if schema.get("type") == "object" and isinstance(value, dict):
         for key, item in value.items():
             path = pointer + "/" + key.replace("~", "~0").replace("/", "~1")
