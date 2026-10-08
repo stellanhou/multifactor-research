@@ -387,6 +387,8 @@ result必须满足当前output_schema提供的JSON Schema；不要返回Schema�
 read_records仅放在外层，不要在result中重复；只使用已声明字段，多出的字段会留痕但不参与执行。
 需要原始证据时输出 {"result": null, "read_records": [{"record_id":"...","pointer":"/路径",
 "offset":0,"limit":100}]}。pointer从record.data开始，空字符串表示完整data。
+offset和limit仅对pointer指向的数组分页；对象会完整返回，limit=1不会缩小对象或其嵌套数组。
+读取大型报告时先指向summary、coverage、plan等具体字段；逐期数据须指向periods或paired_periods等数组再分页。
 分页原文未读到时不能声称已检查全部逐期结果；在报告limitations中写明实际覆盖。
 补读原文会占用同一请求上下文。若请求过大被拒绝，改用更少记录、更小limit或更窄pointer；
 程序不会静默截断所请求的数据。证据已足够时返回结果，并如实说明实际读取范围。
@@ -552,10 +554,24 @@ class AgentGateway:
                         {"role": "assistant", "content": dumps(envelope)},
                         {"role": "user", "content": dumps({"requested_original_evidence": evidence})}]
                     requested_size = self._input_bound(next_messages)
-                    require(requested_size <= budget,
+                    if requested_size > budget:
+                        read_hints = []
+                        for item in evidence:
+                            data = item["data"]
+                            if isinstance(data, dict):
+                                hint = {"record_id": item["record_id"], "pointer": item["pointer"]}
+                                if set(data) == {"total", "offset", "items"}:
+                                    hint["instruction"] = "reduce limit for this array page"
+                                else:
+                                    hint["narrower_pointers"] = [
+                                        item["pointer"] + "/" + key.replace("~", "~0").replace("/", "~1")
+                                        for key in data]
+                                read_hints.append(hint)
+                        raise ValueError(
                             f"requested evidence exceeds remaining context budget: projected upper bound "
                             f"{requested_size}, budget {budget}, current {self._input_bound(messages)}; "
-                            "no evidence was appended; request fewer records, smaller limit or narrower pointers")
+                            "no evidence was appended; request fewer records, smaller limit or narrower pointers. "
+                            "limit only pages arrays, not objects; available read paths: " + dumps(read_hints))
             except EvidenceIntegrityError:
                 raise
             except ValueError as exc:

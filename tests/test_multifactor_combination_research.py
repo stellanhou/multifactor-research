@@ -60,7 +60,7 @@ def _calendar_fixture(*, missing_validation_label=True):
         factor_cube=cube,
         factor_names=["factor_a", "factor_b"],
         market_funding=_empty_market_funding(),
-        dev_contract=SimpleNamespace(),
+        dev_contract=SimpleNamespace(horizon_hours=24),
     )
     return prepared, fit_time, windows, missing_source
 
@@ -244,6 +244,7 @@ def test_common_schedule_skips_training_market_prefix_and_requires_full_validati
     assert market_times[0] == pd.Timestamp("2022-07-31T23:00:00Z")
     prepared = SimpleNamespace(
         timestamps=factor_times,
+        dev_contract=SimpleNamespace(horizon_hours=24),
         symbols=["A"],
         frames={"A": pd.DataFrame(index=market_times)},
         market_full=SimpleNamespace(
@@ -312,7 +313,7 @@ def test_e1_route_keeps_all_common_weekly_fits_through_c_for_rolling_evaluation(
     }, "routes": {}}
     (root / "machine_state.json").write_text(research.json.dumps(state))
     prepared = SimpleNamespace(
-        dev_contract=SimpleNamespace(bounds=(dev_end - pd.Timedelta(days=1095), dev_end)),
+        dev_contract=SimpleNamespace(horizon_hours=24, bounds=(dev_end - pd.Timedelta(days=1095), dev_end)),
         validation_contract=SimpleNamespace(bounds=(dev_end, dev_end + pd.Timedelta(days=365))),
         verify_source_hashes=lambda: None,
     )
@@ -340,7 +341,8 @@ def test_e1_route_keeps_all_common_weekly_fits_through_c_for_rolling_evaluation(
     ]
 
 
-def test_outer_account_target_rows_follow_frozen_global_r0_phase(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize("horizon", [1, 4, 24])
+def test_outer_account_target_rows_follow_frozen_global_r0_phase(tmp_path: Path, monkeypatch, horizon):
     anchor = pd.Timestamp("2025-01-01T23:00:00Z")
     start = anchor + pd.Timedelta(hours=1)
     end = start + pd.Timedelta(hours=72)
@@ -358,7 +360,7 @@ def test_outer_account_target_rows_follow_frozen_global_r0_phase(tmp_path: Path,
                  "max_asset_weight": 0.2, "margin_fraction": 0.1}
     costs = {"initial_capital": 10_000.0, "fee_bps": 5.0,
              "slippage_bps": 2.0, "stress_multiplier": 2.0}
-    contract = SimpleNamespace(bounds=(start, end), portfolio=portfolio, costs=costs)
+    contract = SimpleNamespace(horizon_hours=horizon, bounds=(start, end), portfolio=portfolio, costs=costs)
     prepared = SimpleNamespace(
         timestamps=timestamps, factor_cube=factor_cube, symbols=symbols,
         factor_names=["factor"], frames=frames, funding=_empty_market_funding(),
@@ -397,14 +399,16 @@ def test_outer_account_target_rows_follow_frozen_global_r0_phase(tmp_path: Path,
     research.run_stage_account(prepared, tmp_path, route, [fit], "development")
 
     target_times = captured["targets"].index
-    assert len(target_times) == 3
+    assert len(target_times) == 72 // horizon
     assert target_times[0] == anchor
-    assert all((timestamp - anchor) % pd.Timedelta(hours=24) == pd.Timedelta(0)
+    assert all((timestamp - anchor) % pd.Timedelta(hours=horizon) == pd.Timedelta(0)
                for timestamp in target_times)
     missing_target = captured["targets"].loc[anchor + pd.Timedelta(hours=24)]
     assert (missing_target == 0.0).all()
     assert captured["kwargs"]["start"] == start
 
+    if horizon == 1:
+        return  # Every hourly fit lies on the hourly rebalance phase.
     misaligned_fit = {**fit, "fit_timestamp": anchor + pd.Timedelta(hours=1)}
     with pytest.raises(ValueError, match="original R0 anchor phase"):
         research.run_stage_account(
@@ -479,6 +483,9 @@ def test_evaluate_window_refuses_candidate_trials_from_another_checkpoint(tmp_pa
 def test_frozen_source_manifest_requires_every_declared_implementation_source(tmp_path: Path):
     required = [
         "docs/plans/多因子组合算法90天选优实验Plan_20261003.md",
+        "scripts/multifactor_horizon_turnover.py",
+        "scripts/multifactor_position_validation.py",
+        "src/crypto_quant/research/strategy_research/multifactor_portfolio.py",
         "pyproject.toml",
         "uv.lock",
         "src/crypto_quant/research/strategy_research/multifactor_combination_research.py",
@@ -492,6 +499,7 @@ def test_frozen_source_manifest_requires_every_declared_implementation_source(tm
         "src/crypto_quant/research/strategy_research/multifactor_contracts.py",
         "src/crypto_quant/research/strategy_research/multifactor_rebalance.py",
         "experiments/strategy_research/combination90_20261003/run_combination90.py",
+        "tests/test_multifactor_horizon_turnover.py",
         "tests/test_multifactor_combination_research.py",
         "tests/test_multifactor_combination_search.py",
         "tests/test_multifactor_combination_report.py",
@@ -528,7 +536,7 @@ def test_route_score_frame_switches_weekly_and_preserves_rejected_update_as_cash
         factor_cube=factor_cube,
         symbols=symbols,
         factor_names=["factor"],
-        dev_contract=SimpleNamespace(bounds=(anchor + pd.Timedelta(hours=1), end)),
+        dev_contract=SimpleNamespace(horizon_hours=24, bounds=(anchor + pd.Timedelta(hours=1), end)),
     )
 
     def fit(timestamp, *, status, coefficient):

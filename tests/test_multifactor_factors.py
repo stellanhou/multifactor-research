@@ -1,5 +1,5 @@
 import json
-from types import SimpleNamespace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -7,7 +7,6 @@ import pytest
 
 from crypto_quant.features.factor_expressions import compile_expression
 from crypto_quant.features.factor_inputs import FactorInputPanel
-from crypto_quant.research.factor_mining.workflow import FactorMiner
 from crypto_quant.research.strategy_research.multifactor_factors import (
     process_factors,
     read_cards,
@@ -108,56 +107,10 @@ def test_read_cards_requires_passed_b_admission_and_usdm_hourly_market(tmp_path)
 
 
 def test_read_cards_accepts_current_workflow_card_without_program_version(tmp_path):
+    # Captured from the factor-mining producer; its matching export test verifies the contract.
     expression = "div(perp_close, ts_mean(perp_close, 3))"
-    executed = compile_expression(expression).description()
-    miner = object.__new__(FactorMiner)
-    miner.root = tmp_path
-    miner.spec = SimpleNamespace(
-        run_id="workflow-fixture",
-        universe_provenance="fixed local cohort",
-        data_usage_review="historical evidence is exploratory",
-        admission_scheme="plan3",
-        fdr_method="BH",
-        fdr_alpha=0.05,
-    )
-    card = miner._idea_card(
-        "candidate-0001",
-        {
-            "definition": {
-                "name": "current workflow card",
-                "meaning": "test meaning",
-                "direction": -1,
-                "hypothesis": "test hypothesis",
-            },
-            "executed": executed,
-            "retained_horizons": [24],
-            "a_decision": {"disposition": "retain"},
-            "a_evaluation_ref": {"record_id": "candidate-0001-evaluation"},
-        },
-        {
-            "retained_horizons": [24],
-            "horizons": {
-                "24": {"summary": {"rank_ic": {"mean": 0.1}}, "coverage": {},
-                       "factor_archive": {"root": "factor_archive_v2"}},
-            },
-        },
-        {
-            "mechanism": "test mechanism",
-            "falsifiers": ["test falsifier"],
-            "limitations": ["test limitation"],
-            "next_steps": ["test next step"],
-            "conditions": ["test condition"],
-        },
-        {
-            "eligible_for_idea_pool": True,
-            "validation_status": "passed",
-            "passed_horizons": [24],
-            "retained_horizons": [24],
-            "tracks": [],
-            "tests": [],
-        },
-        "2026-10-02T00:00:00Z",
-    )
+    fixture = Path(__file__).parent / "fixtures/fm_v6_workflow_card.json"
+    card = json.loads(fixture.read_text(encoding="utf-8"))
     path = tmp_path / "current-workflow-card.json"
     path.write_text(json.dumps(card), encoding="utf-8")
 

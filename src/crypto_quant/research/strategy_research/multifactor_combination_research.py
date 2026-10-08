@@ -1,7 +1,7 @@
 """Orchestrate the frozen 90-day multifactor combination experiment.
 
 The search evaluator and account engine remain the authorities for candidate
-and account performance. This module loads the already frozen h24 source,
+and account performance. This module loads the already frozen horizon-specific source,
 builds causal windows, checkpoints complete candidate tables, and resumes route
 runs without replacing completed evidence.
 """
@@ -40,7 +40,6 @@ from . import multifactor_selection_research as research
 from .multifactor_contracts import ResearchContract
 
 
-HORIZON = 24
 HOUR = pd.Timedelta(hours=1)
 WEEK_HOURS = 168
 TRAINING_HOURS = 90 * 24
@@ -322,8 +321,8 @@ def _input_paths(source: Path, stages: dict[str, research.StageInputs]) -> list[
     for stage in ("development", "internal_validation"):
         inputs = stages[stage]
         paths.extend([
-            source / stage / "h24" / "contract.json",
-            source / stage / "h24" / "factor_panels" / "standardized.csv",
+            source / stage / f"h{inputs.contract.horizon_hours}" / "contract.json",
+            source / stage / f"h{inputs.contract.horizon_hours}" / "factor_panels" / "standardized.csv",
             source / stage / "inputs" / "panel.values.csv",
             source / stage / "inputs" / "funding.csv",
             *[source / stage / "inputs" / "market" / f"{symbol}.csv"
@@ -333,7 +332,7 @@ def _input_paths(source: Path, stages: dict[str, research.StageInputs]) -> list[
     return sorted({path.resolve() for path in paths})
 
 
-def _verify_input_freeze(source: Path, paths: list[Path]) -> tuple[dict[str, str], dict[str, Path], str]:
+def _verify_input_freeze(source: Path, paths: list[Path], *, horizon: int = 24) -> tuple[dict[str, str], dict[str, Path], str]:
     preparation_path = source / "preparation_complete.json"
     preparation = json.loads(preparation_path.read_text(encoding="utf-8"))
     if preparation.get("status") != "passed" or preparation.get("symbol_count") != 30:
@@ -357,32 +356,34 @@ def _verify_input_freeze(source: Path, paths: list[Path]) -> tuple[dict[str, str
             raise ValueError(f"source differs from preparation freeze: {relative}")
         previous_digest = previous_manifest.get(str(path.resolve()))
         if previous_digest is not None and previous_digest != digest:
-            raise ValueError(f"h24 source differs from completed selection30 run: {relative}")
+            raise ValueError(f"horizon source differs from completed selection30 run: {relative}")
         hashes[relative] = digest
         hash_paths[relative] = path
 
-    previous_h24_paths = {
+    previous_horizon_paths = {
         name for name in previous_manifest
         if "/development/" in name or "/internal_validation/" in name
-        if "/h24/" in name or "/inputs/" in name
+        if f"/h{horizon}/" in name or "/inputs/" in name
     }
-    expected_h24_paths = {
+    expected_horizon_paths = {
         str(path.resolve()) for path in paths
         if "/development/" in str(path) or "/internal_validation/" in str(path)
     }
-    if previous_h24_paths != expected_h24_paths:
-        missing = sorted(expected_h24_paths - previous_h24_paths)
-        extra = sorted(previous_h24_paths - expected_h24_paths)
+    if previous_horizon_paths != expected_horizon_paths:
+        missing = sorted(expected_horizon_paths - previous_horizon_paths)
+        extra = sorted(previous_horizon_paths - expected_horizon_paths)
         if missing or extra:
-            raise ValueError(f"selection30 h24 execution manifest path set differs: missing={missing[:3]}, extra={extra[:3]}")
+            raise ValueError(f"selection30 horizon execution manifest path set differs: missing={missing[:3]}, extra={extra[:3]}")
     reference_digest = _sha256(previous_manifest_path)
     hashes["../selection30/multifactor-selection30-20261003/source_manifest.json"] = reference_digest
     hash_paths["../selection30/multifactor-selection30-20261003/source_manifest.json"] = previous_manifest_path
     return hashes, hash_paths, reference_digest
 
 
-def prepare_inputs(source_root: Path) -> PreparedInputs:
-    """Load the original h24 development/C inputs and verify every frozen hash."""
+def prepare_inputs(source_root: Path, *, horizon: int = 24) -> PreparedInputs:
+    """Load the requested development/C horizon and verify every frozen hash."""
+    if type(horizon) is not int or horizon not in {1, 4, 24}:
+        raise ValueError("supported horizons are 1, 4, and 24 hours")
     source = Path(source_root).resolve()
     if not source.is_dir():
         raise FileNotFoundError(source)
@@ -391,21 +392,21 @@ def prepare_inputs(source_root: Path) -> PreparedInputs:
     if source_plan.get("engineering_smoke_only") is not False:
         raise ValueError("combination90 requires the original historical 30-asset source")
 
-    dev, _ = research._load_stage_inputs(source, "development", HORIZON, pool)
-    validation, _ = research._load_stage_inputs(source, "internal_validation", HORIZON, pool)
+    dev, _ = research._load_stage_inputs(source, "development", horizon, pool)
+    validation, _ = research._load_stage_inputs(source, "internal_validation", horizon, pool)
     if dev.contract.cards != validation.contract.cards:
-        raise ValueError("development and C h24 card lists differ")
+        raise ValueError("development and C horizon card lists differ")
     factors, opens, factor_overlap, availability = research._combine_model_inputs(
-        dev, validation, min_symbols=3, horizon=HORIZON,
+        dev, validation, min_symbols=3, horizon=horizon,
     )
     frames, funding, account_overlap = research._combined_frames_and_funding({
         "development": dev, "internal_validation": validation,
     })
     card_order = [Path(card).stem for card in dev.contract.cards]
     if list(factors.columns) != card_order:
-        raise ValueError("h24 standardized factor columns differ from the frozen contract card order")
-    if len(card_order) != 53 or len(set(card_order)) != 53:
-        raise ValueError("the h24 frozen factor pool must contain 53 unique card identities")
+        raise ValueError("horizon standardized factor columns differ from the frozen contract card order")
+    if not card_order or len(set(card_order)) != len(card_order):
+        raise ValueError("the horizon frozen factor pool must contain unique card identities")
     sorted_names = sorted(card_order)
     factors = factors.loc[:, sorted_names]
     card_paths = {Path(card).name: Path(card) for card in dev.contract.cards}
@@ -424,13 +425,13 @@ def prepare_inputs(source_root: Path) -> PreparedInputs:
             raise ValueError(f"card snapshot checksum differs from its copied-card manifest: {filename}")
         directions[card_name] = direction
 
-    timestamps, symbols = selection._validate_inputs(factors, opens, HORIZON)
+    timestamps, symbols = selection._validate_inputs(factors, opens, horizon)
     if symbols != sorted(frames):
-        raise ValueError("h24 factor and market universes differ")
+        raise ValueError("horizon factor and market universes differ")
     factor_cube = factors.to_numpy(dtype=float).reshape(len(timestamps), len(symbols), len(sorted_names))
-    dataset = selection._make_labels(factors, opens, timestamps, symbols, HORIZON, 3)
+    dataset = selection._make_labels(factors, opens, timestamps, symbols, horizon, 3)
     if not dataset:
-        raise ValueError("h24 source contains no complete matured cross-sectional labels")
+        raise ValueError("horizon source contains no complete matured cross-sectional labels")
 
     price_wide = opens.unstack("symbol").reindex(index=timestamps, columns=symbols)
     market_open = pd.DataFrame({symbol: frames[symbol]["open"].reindex(timestamps)
@@ -452,7 +453,7 @@ def prepare_inputs(source_root: Path) -> PreparedInputs:
 
     market_full, market_funding = net._market_arrays(frames, symbols, funding)
     source_paths = _input_paths(source, {"development": dev, "internal_validation": validation})
-    source_hashes, hash_paths, reference_sha = _verify_input_freeze(source, source_paths)
+    source_hashes, hash_paths, reference_sha = _verify_input_freeze(source, source_paths, horizon=horizon)
     return PreparedInputs(
         source_root=source, factors=factors, opens=opens, frames=frames, funding=funding,
         dev_contract=dev.contract, validation_contract=validation.contract, pool=pool,
@@ -632,7 +633,7 @@ def common_fit_times(prepared: PreparedInputs, *, validation_hours: int = VALIDA
         if end is not None and fit_time >= end:
             continue
         window = search.calendar_windows(
-            fit_time, horizon=HORIZON, training_hours=TRAINING_HOURS,
+            fit_time, horizon=prepared.dev_contract.horizon_hours, training_hours=TRAINING_HOURS,
             validation_hours=validation_hours, refit_hours=REFIT_HOURS,
         )
         if not _full_calendar(prepared, window):
@@ -662,7 +663,7 @@ def build_window_context(prepared: PreparedInputs, fit_time: pd.Timestamp, *,
     """Build the exact train/selection/refit data slices for one weekly fit."""
     fit_time = pd.Timestamp(fit_time).tz_convert("UTC")
     windows = search.calendar_windows(
-        fit_time, horizon=HORIZON, training_hours=TRAINING_HOURS,
+        fit_time, horizon=prepared.dev_contract.horizon_hours, training_hours=TRAINING_HOURS,
         validation_hours=validation_hours, refit_hours=REFIT_HOURS,
     )
     if not _full_calendar(prepared, windows):
@@ -938,7 +939,7 @@ def evaluate_window(prepared: PreparedInputs, run_root: Path, run_contract_sha25
         "identity": expected_identity,
         "route": route,
         "fit_timestamp": fit_time,
-        "windows": context.windows.audit(HORIZON),
+        "windows": context.windows.audit(prepared.dev_contract.horizon_hours),
         "factor_names": prepared.factor_names,
         "proposed_indices": list(proposed) if proposed is not None else None,
         "proposed_factors": [prepared.factor_names[index] for index in proposed]
@@ -1025,6 +1026,9 @@ def _cluster_window(prepared: PreparedInputs, root: Path, run_contract_sha256: s
 def _module_hashes(project_root: Path) -> dict[str, str]:
     paths = [
         project_root / "docs/plans/多因子组合算法90天选优实验Plan_20261003.md",
+        project_root / "scripts/multifactor_horizon_turnover.py",
+        project_root / "scripts/multifactor_position_validation.py",
+        project_root / "src/crypto_quant/research/strategy_research/multifactor_portfolio.py",
         project_root / "pyproject.toml",
         project_root / "uv.lock",
         project_root / "src/crypto_quant/research/strategy_research/multifactor_combination_research.py",
@@ -1038,6 +1042,7 @@ def _module_hashes(project_root: Path) -> dict[str, str]:
         project_root / "src/crypto_quant/research/strategy_research/multifactor_combination_report.py",
         project_root / "src/crypto_quant/research/strategy_research/multifactor_combination_verify.py",
         project_root / "experiments/strategy_research/combination90_20261003/run_combination90.py",
+        project_root / "tests/test_multifactor_horizon_turnover.py",
         project_root / "tests/test_multifactor_combination_research.py",
         project_root / "tests/test_multifactor_combination_search.py",
         project_root / "tests/test_multifactor_combination_report.py",
@@ -1069,7 +1074,9 @@ def _snapshot_execution_sources(run_root: Path, project_root: Path,
 
 
 def freeze_run(prepared: PreparedInputs, run_root: Path, *,
-               run_id: str = "multifactor-combination90-20261003") -> dict[str, Any]:
+               run_id: str = "multifactor-combination90-20261003",
+               route_ids: list[str] | None = None,
+               execution_profile: dict[str, Any] | None = None) -> dict[str, Any]:
     """Create or verify the run freeze; an identical run may be resumed."""
     root = Path(run_root).resolve()
     project_root = Path(__file__).resolve().parents[4]
@@ -1077,19 +1084,25 @@ def freeze_run(prepared: PreparedInputs, run_root: Path, *,
     if prepared.source_root.resolve() != (project_root / "experiments/strategy_research/selection30_20261003/source_inputs").resolve():
         raise ValueError("combination90 source must be selection30_20261003/source_inputs")
     selection_rule = primary_selection_rule()
+    routes = route_definitions()
+    if route_ids is not None:
+        if not route_ids or len(set(route_ids)) != len(route_ids) or set(route_ids) - {r["route_id"] for r in routes}:
+            raise ValueError("route_ids must be unique declared routes")
+        routes = [r for r in routes if r["route_id"] in route_ids]
+    profile = EXECUTION_PROFILE if execution_profile is None else execution_profile
     run_contract = {
         "schema_version": 1,
         "run_id": run_id,
         "source_run": str(prepared.source_root),
         "source_freeze_reference_sha256": prepared.source_freeze_reference_sha256,
         "source_hashes": prepared.source_hashes,
-        "source_hash_policy": "h24 execution dependencies plus frozen h24 card snapshots; no h1/h4 model inputs",
+        "source_hash_policy": f"h{prepared.dev_contract.horizon_hours} execution dependencies and frozen cards",
         "factor_count": len(prepared.factor_names),
         "factor_order": prepared.factor_names,
         "source_card_order": prepared.card_order,
         "factor_directions": prepared.directions,
         "factor_direction_policy": "use source standardized panel with the frozen card direction already applied",
-        "horizon_hours": HORIZON,
+        "horizon_hours": prepared.dev_contract.horizon_hours,
         "rebalance": "R0",
         "portfolio": dict(prepared.dev_contract.portfolio),
         "costs": dict(prepared.dev_contract.costs),
@@ -1102,7 +1115,7 @@ def freeze_run(prepared: PreparedInputs, run_root: Path, *,
             "update_hours": WEEK_HOURS,
             "update_anchor": prepared.timestamps[0],
             "r0_anchor": prepared.dev_contract.bounds[0] - HOUR,
-            "horizon_label_gap_hours": HORIZON + 1,
+            "horizon_label_gap_hours": prepared.dev_contract.horizon_hours + 1,
             "strict_train_purge": "latest train label matures at least one hour before first validation source",
             "cluster_count": CLUSTER_COUNT,
             "cluster_metric": "average linkage over 1 - abs(time-mean hourly cross-sectional Pearson correlation)",
@@ -1116,14 +1129,14 @@ def freeze_run(prepared: PreparedInputs, run_root: Path, *,
             "initial_objective_kind": INITIAL_OBJECTIVE_KIND,
             "admission": ADMISSION_RULE,
         },
-        "routes": route_definitions(),
+        "routes": routes,
         "selection_rule": selection_rule,
         "stages": {
             "development": {"start": prepared.dev_contract.start, "end": prepared.dev_contract.end},
             "internal_validation": {"start": prepared.validation_contract.start,
                                     "end": prepared.validation_contract.end},
         },
-        "execution_profile": EXECUTION_PROFILE,
+        "execution_profile": profile,
         "software_versions": {
             "python": platform.python_version(),
             "numpy": metadata.version("numpy"),
@@ -1184,13 +1197,13 @@ def freeze_run(prepared: PreparedInputs, run_root: Path, *,
         state = json.loads(state_path.read_text(encoding="utf-8"))
         if state.get("run_contract_sha256") != contract_sha:
             raise ValueError("machine state belongs to another run contract")
-        if state.get("execution_profile") != EXECUTION_PROFILE:
+        if state.get("execution_profile") != profile:
             raise ValueError("machine state execution profile differs from the original run budget")
     else:
         state = {
             "schema_version": 1, "run_id": run_id,
             "run_contract_sha256": contract_sha,
-            "execution_profile": dict(EXECUTION_PROFILE),
+            "execution_profile": dict(profile),
             "created_at_utc": pd.Timestamp.now(tz="UTC"),
             "statuses": {f"E{i}": {"status": "pending", "completed_fit_times": [],
                                     "stage_accounts": 0, "elapsed_seconds": 0.0,
@@ -1198,7 +1211,9 @@ def freeze_run(prepared: PreparedInputs, run_root: Path, *,
                                     "resume_entrypoint": "run_combination90.py"}
                          for i in range(7)},
             "routes": {}, "forward_validation_started": False, "paper_started": False,
-            "expected_stage_accounts": {"core_E1_E3": 44, "expanded_E1_E5": 68},
+            "expected_stage_accounts": {
+                "core_E1_E3": 4 * sum(r["experiment"] in {"E1", "E2", "E3"} for r in routes),
+                "expanded_E1_E5": 4 * len(routes)},
             "execution_scope": "core",
             "account_manifest_path": "account_manifest.json",
         }
@@ -1409,7 +1424,7 @@ def _route_score_frame(prepared: PreparedInputs, fits: list[dict[str, Any]],
     if (fit_positions < 0).any():
         raise ValueError("outer account begins before the first completed weekly fit")
     r0_anchor = prepared.dev_contract.bounds[0] - HOUR
-    if ((start - HOUR).value - r0_anchor.value) % (HORIZON * HOUR.value):
+    if ((start - HOUR).value - r0_anchor.value) % (prepared.dev_contract.horizon_hours * HOUR.value):
         raise ValueError("outer account start does not preserve the original R0 anchor phase")
     schedule_entries = []
     for fit_index in sorted(set(fit_positions.tolist())):
@@ -1477,7 +1492,7 @@ def run_stage_account(prepared: PreparedInputs, run_root: Path, route: dict[str,
         short_count=portfolio["short_count"],
         gross_exposure=portfolio["gross_exposure"],
         max_asset_weight=portfolio["max_asset_weight"],
-        rebalance_hours=HORIZON, start=start,
+        rebalance_hours=prepared.dev_contract.horizon_hours, start=start,
     )
     frame_index = pd.date_range(start - HOUR, end - HOUR, freq="h", tz="UTC")
     market_frames = {symbol: frame.reindex(frame_index)
@@ -1505,7 +1520,7 @@ def run_stage_account(prepared: PreparedInputs, run_root: Path, route: dict[str,
         "portfolio": dict(portfolio),
         "lifecycle_events": json.loads((prepared.source_root / "lifecycle.json").read_text(encoding="utf-8"))["events"],
         "r0_anchor": prepared.dev_contract.bounds[0] - HOUR,
-        "r0_rebalance_hours": HORIZON, "model_schedule": model_schedule,
+        "r0_rebalance_hours": prepared.dev_contract.horizon_hours, "model_schedule": model_schedule,
         "target_rows": len(targets), "signal_rows": len(score_frame),
         "accounting_engine": "multifactor_account.run_perpetual_account",
         "source_freeze_reference_sha256": prepared.source_freeze_reference_sha256,

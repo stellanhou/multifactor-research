@@ -1,0 +1,113 @@
+{
+  "id": "workflow-fixture--candidate-0001",
+  "source_type": "factor_mining",
+  "status": "research_idea",
+  "source": {
+    "run_id": "workflow-fixture",
+    "candidate_id": "candidate-0001",
+    "date": "2026-10-02T00:00:00Z",
+    "research_directory": "experiments/workflow-fixture"
+  },
+  "original_claim": {
+    "formula": {
+      "expression": "div(perp_close, ts_mean(perp_close, 3))",
+      "expanded_expression": "div(perp_close, ts_mean(perp_close, 3))",
+      "fields": [
+        "perp_close"
+      ],
+      "lookback_hours": 2
+    },
+    "meaning": "test meaning",
+    "direction": -1,
+    "hypothesis": "test hypothesis",
+    "initial_findings": {
+      "24": {
+        "rank_ic": {
+          "mean": 0.1
+        }
+      }
+    }
+  },
+  "economic_mechanism": "test mechanism",
+  "market_and_horizon": {
+    "venue": "Binance",
+    "market": "USD-M perpetual",
+    "inputs": "1h",
+    "target": [
+      24
+    ],
+    "retained_horizons": [
+      24
+    ],
+    "passed_horizons": [
+      24
+    ]
+  },
+  "data_and_coverage": {
+    "fields": [
+      "perp_close"
+    ],
+    "B": {
+      "24": {}
+    },
+    "universe_provenance": "fixed local cohort",
+    "data_usage_review": "historical evidence is exploratory"
+  },
+  "falsification_conditions": [
+    "test falsifier"
+  ],
+  "unverified_assumptions": [
+    "test limitation",
+    "因子参数未经最优性证明；完整选币、调仓、仓位、成本及风险规则待研究",
+    "准入规则在既有B区间被使用后修订；该B结果不能充当规则选择后的全新独立验证。"
+  ],
+  "next_research_plan": [
+    "test next step"
+  ],
+  "applicability": [
+    "test condition"
+  ],
+  "admission_evidence": {
+    "eligible_for_idea_pool": true,
+    "validation_status": "passed",
+    "passed_horizons": [
+      24
+    ],
+    "retained_horizons": [
+      24
+    ],
+    "tracks": [],
+    "tests": []
+  },
+  "multiple_testing": {
+    "method": "BH",
+    "alpha": 0.05
+  },
+  "evidence_references": {
+    "A": {
+      "record_id": "candidate-0001-evaluation"
+    },
+    "B": {
+      "record_id": "candidate-0001-evaluation",
+      "factor_archives": {
+        "24": {
+          "root": "factor_archive_v2"
+        }
+      }
+    }
+  },
+  "a_research_decision": {
+    "disposition": "retain"
+  },
+  "b_validation_status": "passed",
+  "strategy_validation_status": "not_started",
+  "title": "current workflow card · 基础型",
+  "classification": {
+    "scheme": "plan3",
+    "tracks": [],
+    "track_labels": [
+      "基础型"
+    ],
+    "tracks_gate": false
+  }
+}

@@ -1,5 +1,6 @@
 import json
 import shutil
+import tarfile
 from pathlib import Path
 
 import pandas as pd
@@ -11,15 +12,13 @@ from crypto_quant.research.strategy_research.multifactor_contracts import Multif
 from crypto_quant.research.strategy_research.multifactor_evidence import load_baseline_snapshot
 
 
-BASELINE_ROOT = (
-    Path(__file__).resolve().parents[1]
-    / "experiments/strategy_research/multifactor_v1/multifactor-engineering-20261002"
-)
-
-
-def _copy_snapshot(tmp_path):
-    root = tmp_path / "snapshot"
-    shutil.copytree(BASELINE_ROOT, root)
+@pytest.fixture(scope="module")
+def baseline_root(tmp_path_factory):
+    destination = tmp_path_factory.mktemp("baseline-evidence")
+    archive = Path(__file__).parent / "fixtures/multifactor-engineering-20261002.tar.gz"
+    with tarfile.open(archive, "r:gz") as handle:
+        handle.extractall(destination, filter="data")
+    root = destination / "snapshot"
     result_path = root / "result.json"
     result = json.loads(result_path.read_text(encoding="utf-8"))
     result["root"] = str(root.resolve())
@@ -27,12 +26,22 @@ def _copy_snapshot(tmp_path):
     return root
 
 
-def test_load_baseline_snapshot_uses_frozen_inputs_and_builds_compact_evidence(monkeypatch):
+def _copy_snapshot(tmp_path, baseline_root):
+    root = tmp_path / "snapshot"
+    shutil.copytree(baseline_root, root)
+    result_path = root / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["root"] = str(root.resolve())
+    result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return root
+
+
+def test_load_baseline_snapshot_uses_frozen_inputs_and_builds_compact_evidence(baseline_root, monkeypatch):
     def no_database_reads(*args, **kwargs):
         pytest.fail("baseline snapshot loader must not access the live database")
 
     monkeypatch.setattr(multifactor_data, "load_inputs", no_database_reads)
-    snapshot = load_baseline_snapshot(BASELINE_ROOT, for_research_agent=True)
+    snapshot = load_baseline_snapshot(baseline_root, for_research_agent=True)
 
     assert snapshot.contract.run_id == "multifactor-engineering-20261002"
     assert len(snapshot.cards) == 3
@@ -57,8 +66,8 @@ def test_load_baseline_snapshot_uses_frozen_inputs_and_builds_compact_evidence(m
     assert all(record["run_id"] == snapshot.contract.run_id for record in snapshot.records.values())
 
 
-def test_research_agent_rejects_internal_validation_before_reading_factor_files(tmp_path):
-    root = _copy_snapshot(tmp_path)
+def test_research_agent_rejects_internal_validation_before_reading_factor_files(baseline_root, tmp_path):
+    root = _copy_snapshot(tmp_path, baseline_root)
     contract_path = root / "contract.json"
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     contract.update(schema_version=2, purpose="research", dataset_manifest="data/manifest.json")
@@ -73,8 +82,8 @@ def test_research_agent_rejects_internal_validation_before_reading_factor_files(
         load_baseline_snapshot(root, for_research_agent=True)
 
 
-def test_snapshot_loader_rejects_card_snapshot_hash_mismatch(tmp_path):
-    root = _copy_snapshot(tmp_path)
+def test_snapshot_loader_rejects_card_snapshot_hash_mismatch(baseline_root, tmp_path):
+    root = _copy_snapshot(tmp_path, baseline_root)
     manifest = json.loads((root / "cards.json").read_text(encoding="utf-8"))
     card_path = root / manifest[0]["snapshot_path"]
     card_path.write_bytes(card_path.read_bytes() + b" ")
@@ -83,8 +92,8 @@ def test_snapshot_loader_rejects_card_snapshot_hash_mismatch(tmp_path):
         load_baseline_snapshot(root)
 
 
-def test_snapshot_loader_rejects_fractional_coverage_counts(tmp_path):
-    root = _copy_snapshot(tmp_path)
+def test_snapshot_loader_rejects_fractional_coverage_counts(baseline_root, tmp_path):
+    root = _copy_snapshot(tmp_path, baseline_root)
     path = root / "coverage_impact.csv"
     frame = pd.read_csv(path, float_precision="round_trip")
     frame["account_raw_valid_rows"] = frame["account_raw_valid_rows"].astype(float)
@@ -99,8 +108,8 @@ def test_snapshot_loader_rejects_fractional_coverage_counts(tmp_path):
     "inputs/panel.values.csv",
     "inputs/market/ADAUSDT.csv",
 ])
-def test_snapshot_loader_rejects_symlinked_inputs_outside_root(tmp_path, relative_path):
-    root = _copy_snapshot(tmp_path)
+def test_snapshot_loader_rejects_symlinked_inputs_outside_root(baseline_root, tmp_path, relative_path):
+    root = _copy_snapshot(tmp_path, baseline_root)
     outside = tmp_path / "external-input.csv"
     outside.write_text("outside snapshot data\n", encoding="utf-8")
     target = root / relative_path
@@ -116,9 +125,9 @@ def test_snapshot_loader_rejects_symlinked_inputs_outside_root(tmp_path, relativ
     ("cash", "ledger cash differs from realized PnL, fees, and funding"),
 ])
 def test_snapshot_loader_rejects_broken_ledger_identities_even_with_synced_metrics(
-    tmp_path, tamper, expected_error,
+    baseline_root, tmp_path, tamper, expected_error,
 ):
-    root = _copy_snapshot(tmp_path)
+    root = _copy_snapshot(tmp_path, baseline_root)
     result_path = root / "result.json"
     result = json.loads(result_path.read_text(encoding="utf-8"))
     experiment = result["experiments"][0]
@@ -154,8 +163,8 @@ def test_snapshot_loader_rejects_broken_ledger_identities_even_with_synced_metri
     ("historical_causality_certified", True, "overstates historical causality"),
     ("policy_id", "different-policy", "policy or actual database processing"),
 ])
-def test_snapshot_loader_rejects_overstated_data_provenance(tmp_path, field, value, error):
-    root = _copy_snapshot(tmp_path)
+def test_snapshot_loader_rejects_overstated_data_provenance(baseline_root, tmp_path, field, value, error):
+    root = _copy_snapshot(tmp_path, baseline_root)
     path = root / "inputs/data-provenance.json"
     provenance = json.loads(path.read_text(encoding="utf-8"))
     provenance[field] = value
@@ -169,8 +178,8 @@ def test_snapshot_loader_rejects_overstated_data_provenance(tmp_path, field, val
     "factor_panels/standardized.csv",
     "factor_panels/common_mask.csv",
 ])
-def test_snapshot_loader_rejects_factor_panel_changes(tmp_path, relative_path):
-    root = _copy_snapshot(tmp_path)
+def test_snapshot_loader_rejects_factor_panel_changes(baseline_root, tmp_path, relative_path):
+    root = _copy_snapshot(tmp_path, baseline_root)
     path = root / relative_path
     frame = pd.read_csv(path, float_precision="round_trip")
     if relative_path.endswith("standardized.csv"):
@@ -194,8 +203,8 @@ def test_snapshot_loader_rejects_factor_panel_changes(tmp_path, relative_path):
     ("ledger", "ledger cash differs from realized PnL, fees, and funding"),
     ("external_path", "metrics path differs from its experiment directory"),
 ])
-def test_snapshot_loader_rejects_tampered_research_evidence(tmp_path, tamper, expected_error):
-    root = _copy_snapshot(tmp_path)
+def test_snapshot_loader_rejects_tampered_research_evidence(baseline_root, tmp_path, tamper, expected_error):
+    root = _copy_snapshot(tmp_path, baseline_root)
     result_path = root / "result.json"
     result = json.loads(result_path.read_text(encoding="utf-8"))
 

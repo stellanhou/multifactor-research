@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "crypto-quant-research"
+name = "multifactor-research"
 version = "0.1.0"
-description = "Personal crypto quant research and backtesting system"
+description = "Independent multifactor-research system"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "numpy==2.0.2",
@@ -33,13 +33,10 @@ liquidation-data = [
 ]
 
 [project.scripts]
-crypto-quant = "crypto_quant.cli:main"
+multifactor-research = "crypto_quant.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"crypto_quant.web_console" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
